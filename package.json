@@ -1,0 +1,21 @@
+{
+    "name": "hack-kit",
+    "version": "1.0.0",
+    "private": true,
+    "workspaces": [
+        "apps/*"
+    ],
+    "scripts": {
+        "dev": "concurrently \"npm run dev --workspace @hackkit/backend\" \"npm run dev --workspace @hackkit/frontend\"",
+        "dev:backend": "npm run dev --workspace @hackkit/backend",
+        "dev:frontend": "npm run dev --workspace @hackkit/frontend",
+        "build": "npm run build --workspaces --if-present",
+        "typecheck": "npm run typecheck --workspace @hackkit/backend"
+    },
+    "devDependencies": {
+        "concurrently": "^10.0.7"
+    },
+    "allowScripts": {
+        "esbuild@0.28.2": true
+    }
+}
