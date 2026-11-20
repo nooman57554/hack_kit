@@ -46,6 +46,6 @@ Backend: http://localhost:5000
 
 Backend health: http://localhost:5000/api/health
 
-PostgreSQL: localhost:5432
+PostgreSQL: localhost:5433
 
 Redis: localhost:6379

@@ -8,9 +8,9 @@
         "build": "tsc -p tsconfig.json",
         "start": "node dist/server.js",
         "typecheck": "tsc --noEmit",
-        "prisma:generate": "dotenv run -f ../../.env -- prisma generate",
-        "prisma:migrate": "dotenv run -f ../../.env -- prisma migrate dev",
-        "prisma:seed": "dotenv run -f ../../.env -- prisma db seed"
+        "prisma:generate": "npm --prefix ../.. run db:generate",
+        "prisma:migrate": "npm --prefix ../.. run db:migrate",
+        "prisma:seed": "npm --prefix ../.. run db:seed"
     },
     "prisma": {
         "seed": "tsx prisma/seed.ts"

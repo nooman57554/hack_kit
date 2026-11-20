@@ -21,7 +21,10 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
   }
 
   try {
-    const decoded = jwt.verify(token, env.JWT_SECRET) as JwtTokenPayload;
+    const decoded = jwt.verify(token, env.JWT_SECRET, {
+      algorithms: ["HS256"],
+    }) as JwtTokenPayload;
+
     if (!decoded || typeof decoded.userId !== "string" || !decoded.userId.trim()) {
       return next(new UnauthorizedError("Invalid token payload"));
     }
