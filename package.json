@@ -10,7 +10,10 @@
         "dev:backend": "npm run dev --workspace @hackkit/backend",
         "dev:frontend": "npm run dev --workspace @hackkit/frontend",
         "build": "npm run build --workspaces --if-present",
-        "typecheck": "npm run typecheck --workspace @hackkit/backend"
+        "typecheck": "npm run typecheck --workspace @hackkit/backend",
+        "db:migrate": "prisma migrate dev --schema=apps/backend/prisma/schema.prisma",
+        "db:seed": "tsx apps/backend/prisma/seed.ts",
+        "db:generate": "prisma generate --schema=apps/backend/prisma/schema.prisma"
     },
     "devDependencies": {
         "concurrently": "^10.0.7"
