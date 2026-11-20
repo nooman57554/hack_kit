@@ -13,7 +13,8 @@
         "typecheck": "npm run typecheck --workspace @hackkit/backend",
         "db:migrate": "prisma migrate dev --schema=apps/backend/prisma/schema.prisma",
         "db:seed": "tsx apps/backend/prisma/seed.ts",
-        "db:generate": "prisma generate --schema=apps/backend/prisma/schema.prisma"
+        "db:generate": "prisma generate --schema=apps/backend/prisma/schema.prisma",
+        "user:promote-admin": "npm run user:promote-admin --workspace=@hackkit/backend --"
     },
     "devDependencies": {
         "concurrently": "^10.0.7"

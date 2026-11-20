@@ -8,17 +8,20 @@
         "build": "tsc -p tsconfig.json",
         "start": "node dist/server.js",
         "typecheck": "tsc --noEmit",
-        "prisma:generate": "npm --prefix ../.. run db:generate",
-        "prisma:migrate": "npm --prefix ../.. run db:migrate",
-        "prisma:seed": "npm --prefix ../.. run db:seed"
+        "prisma:generate": "prisma generate",
+        "prisma:migrate": "prisma migrate dev",
+        "prisma:seed": "prisma db seed",
+        "user:promote-admin": "tsx scripts/promote-admin.ts"
     },
     "prisma": {
         "seed": "tsx prisma/seed.ts"
     },
     "dependencies": {
         "@prisma/client": "^6.19.3",
+        "bcryptjs": "^3.0.3",
         "dotenv": "^18.0.10",
         "express": "^5.3.0",
+        "express-rate-limit": "^8.7.5",
         "helmet": "^8.3.0",
         "jsonwebtoken": "^9.0.3",
         "zod": "^4.6.7"
