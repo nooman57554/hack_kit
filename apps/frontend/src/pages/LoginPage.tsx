@@ -1,0 +1,143 @@
+import { zodResolver } from "@hookform/resolvers/zod";
+import { useMutation } from "@tanstack/react-query";
+import { AlertCircle, Loader2, LogIn } from "lucide-react";
+import { useForm } from "react-hook-form";
+import { Link, useNavigate } from "react-router-dom";
+import { ApiError, loginUser } from "../api/auth";
+import { useAuth } from "../auth/auth-context";
+import { loginSchema, type LoginFormValues } from "../schemas/auth";
+
+export function LoginPage() {
+  const navigate = useNavigate();
+  const { setAuthToken } = useAuth();
+
+  const {
+    register,
+    handleSubmit,
+    setError,
+    formState: { errors },
+  } = useForm<LoginFormValues>({
+    resolver: zodResolver(loginSchema),
+    defaultValues: {
+      email: "",
+      password: "",
+    },
+  });
+
+  const loginMutation = useMutation({
+    mutationFn: loginUser,
+    onSuccess: (data) => {
+      setAuthToken(data.token);
+      navigate("/", { replace: true });
+    },
+    onError: (err) => {
+      if (err instanceof ApiError && err.details) {
+        for (const [field, messages] of Object.entries(err.details)) {
+          if (messages?.[0] && (field === "email" || field === "password")) {
+            setError(field, { message: messages[0] });
+          }
+        }
+      }
+    },
+  });
+
+  const onSubmit = (values: LoginFormValues) => {
+    loginMutation.mutate(values);
+  };
+
+  return (
+    <main className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+      <section className="w-full max-w-md rounded-2xl border border-slate-800 bg-slate-900 p-8 shadow-xl">
+        <div className="mb-6">
+          <p className="text-xs font-semibold uppercase tracking-widest text-blue-400">
+            Hack Kit
+          </p>
+          <h1 className="mt-2 text-2xl font-bold tracking-tight text-white">
+            Sign in to your account
+          </h1>
+          <p className="mt-1.5 text-sm text-slate-400">
+            Enter your email and password to access your workspace.
+          </p>
+        </div>
+
+        {loginMutation.isError && (
+          <div
+            role="alert"
+            className="mb-5 flex items-start gap-2.5 rounded-xl border border-red-500/30 bg-red-500/10 p-3.5 text-sm text-red-300"
+          >
+            <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-red-400" />
+            <span>
+              {loginMutation.error instanceof Error
+                ? loginMutation.error.message
+                : "Unable to sign in. Please try again."}
+            </span>
+          </div>
+        )}
+
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+          <div>
+            <label htmlFor="email" className="block text-sm font-medium text-slate-300">
+              Email address
+            </label>
+            <input
+              id="email"
+              type="email"
+              autoComplete="email"
+              placeholder="you@example.com"
+              {...register("email")}
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+            {errors.email && (
+              <p className="mt-1.5 text-xs text-red-400">{errors.email.message}</p>
+            )}
+          </div>
+
+          <div>
+            <label htmlFor="password" className="block text-sm font-medium text-slate-300">
+              Password
+            </label>
+            <input
+              id="password"
+              type="password"
+              autoComplete="current-password"
+              placeholder="Enter your password"
+              {...register("password")}
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+            />
+            {errors.password && (
+              <p className="mt-1.5 text-xs text-red-400">{errors.password.message}</p>
+            )}
+          </div>
+
+          <button
+            type="submit"
+            disabled={loginMutation.isPending}
+            className="mt-2 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-blue-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-blue-500 disabled:cursor-not-allowed disabled:opacity-60 cursor-pointer"
+          >
+            {loginMutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Signing in...
+              </>
+            ) : (
+              <>
+                <LogIn className="h-4 w-4" />
+                Sign in
+              </>
+            )}
+          </button>
+        </form>
+
+        <p className="mt-6 text-center text-sm text-slate-400">
+          Don&apos;t have an account?{" "}
+          <Link
+            to="/register"
+            className="font-medium text-blue-400 hover:text-blue-300 transition"
+          >
+            Create one
+          </Link>
+        </p>
+      </section>
+    </main>
+  );
+}
