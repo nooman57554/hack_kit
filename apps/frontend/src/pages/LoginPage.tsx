@@ -79,7 +79,7 @@ export function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate autoComplete="off" className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-300">
               Email address
@@ -87,10 +87,10 @@ export function LoginPage() {
             <input
               id="email"
               type="email"
-              autoComplete="off"
+              autoComplete="email"
               placeholder="you@example.com"
               {...register("email")}
-              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-slate-50 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
             />
             {errors.email && (
               <p className="mt-1.5 text-xs text-red-400">{errors.email.message}</p>
@@ -105,10 +105,10 @@ export function LoginPage() {
               <input
                 id="password"
                 type={showPassword ? "text" : "password"}
-                autoComplete="off"
+                autoComplete="current-password"
                 placeholder="Enter your password"
                 {...register("password")}
-                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 pr-10 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 pr-10 text-sm text-slate-50 placeholder:text-slate-400 focus:border-blue-400 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
               />
               <button
                 type="button"
