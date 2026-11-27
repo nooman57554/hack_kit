@@ -1,6 +1,7 @@
 import { zodResolver } from "@hookform/resolvers/zod";
 import { useMutation } from "@tanstack/react-query";
-import { AlertCircle, Loader2, LogIn } from "lucide-react";
+import { AlertCircle, Eye, EyeOff, Loader2, LogIn } from "lucide-react";
+import { useState } from "react";
 import { useForm } from "react-hook-form";
 import { Link, useNavigate } from "react-router-dom";
 import { ApiError, loginUser } from "../api/auth";
@@ -10,11 +11,13 @@ import { loginSchema, type LoginFormValues } from "../schemas/auth";
 export function LoginPage() {
   const navigate = useNavigate();
   const { setAuthToken } = useAuth();
+  const [showPassword, setShowPassword] = useState(false);
 
   const {
     register,
     handleSubmit,
     setError,
+    reset,
     formState: { errors },
   } = useForm<LoginFormValues>({
     resolver: zodResolver(loginSchema),
@@ -27,6 +30,8 @@ export function LoginPage() {
   const loginMutation = useMutation({
     mutationFn: loginUser,
     onSuccess: (data) => {
+      reset({ email: "", password: "" });
+      setShowPassword(false);
       setAuthToken(data.token);
       navigate("/", { replace: true });
     },
@@ -74,7 +79,7 @@ export function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSubmit(onSubmit)} noValidate className="space-y-4">
+        <form onSubmit={handleSubmit(onSubmit)} noValidate autoComplete="off" className="space-y-4">
           <div>
             <label htmlFor="email" className="block text-sm font-medium text-slate-300">
               Email address
@@ -82,7 +87,7 @@ export function LoginPage() {
             <input
               id="email"
               type="email"
-              autoComplete="email"
+              autoComplete="off"
               placeholder="you@example.com"
               {...register("email")}
               className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
@@ -96,14 +101,29 @@ export function LoginPage() {
             <label htmlFor="password" className="block text-sm font-medium text-slate-300">
               Password
             </label>
-            <input
-              id="password"
-              type="password"
-              autoComplete="current-password"
-              placeholder="Enter your password"
-              {...register("password")}
-              className="mt-1.5 w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
-            />
+            <div className="relative mt-1.5">
+              <input
+                id="password"
+                type={showPassword ? "text" : "password"}
+                autoComplete="off"
+                placeholder="Enter your password"
+                {...register("password")}
+                className="w-full rounded-lg border border-slate-700 bg-slate-950 px-3.5 py-2.5 pr-10 text-sm text-white placeholder-slate-500 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/30"
+              />
+              <button
+                type="button"
+                onClick={() => setShowPassword((prev) => !prev)}
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                aria-pressed={showPassword}
+                className="absolute inset-y-0 right-0 flex items-center px-3 text-slate-400 hover:text-slate-200 transition cursor-pointer"
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" aria-hidden="true" />
+                ) : (
+                  <Eye className="h-4 w-4" aria-hidden="true" />
+                )}
+              </button>
+            </div>
             {errors.password && (
               <p className="mt-1.5 text-xs text-red-400">{errors.password.message}</p>
             )}
