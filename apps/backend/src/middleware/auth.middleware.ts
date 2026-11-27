@@ -15,17 +15,26 @@ export function authenticate(req: Request, _res: Response, next: NextFunction): 
     return next(new UnauthorizedError("Authentication token is required"));
   }
 
-  const [scheme, token] = authHeader.split(" ");
-  if (scheme !== "Bearer" || !token) {
+  const parts = authHeader.split(" ");
+  if (parts.length !== 2 || parts[0] !== "Bearer" || !parts[1] || /\s/.test(parts[1])) {
     return next(new UnauthorizedError("Invalid authorization format. Expected 'Bearer <token>'"));
   }
+
+  const token = parts[1];
 
   try {
     const decoded = jwt.verify(token, env.JWT_SECRET, {
       algorithms: ["HS256"],
     }) as JwtTokenPayload;
 
-    if (!decoded || typeof decoded.userId !== "string" || !decoded.userId.trim()) {
+    if (
+      !decoded ||
+      typeof decoded !== "object" ||
+      typeof decoded.userId !== "string" ||
+      !decoded.userId.trim() ||
+      typeof decoded.exp !== "number" ||
+      !Number.isFinite(decoded.exp)
+    ) {
       return next(new UnauthorizedError("Invalid token payload"));
     }
 

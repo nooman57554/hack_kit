@@ -12,6 +12,11 @@ import {
 } from "../../utils/errors.js";
 import { LoginInput, RegisterInput } from "./auth.schema.js";
 
+const BCRYPT_COST = 10;
+// Precomputed dummy hash (cost 10) to equalize login timing when an email is unknown
+const DUMMY_PASSWORD_HASH =
+  "$2b$10$1u.D6pxLC6ySptBBh8rFHuF41UZaqosewqJZv7q8BapUQclXU2uTC";
+
 export interface SafeUser {
   id: string;
   name: string;
@@ -51,7 +56,7 @@ export class AuthService {
       throw new AppError("Default MEMBER role not found in database", 500);
     }
 
-    const hashedPassword = await bcrypt.hash(password, 10);
+    const hashedPassword = await bcrypt.hash(password, BCRYPT_COST);
 
     try {
       const user = await prisma.user.create({
@@ -99,12 +104,10 @@ export class AuthService {
       where: { email },
     });
 
-    if (!user) {
-      throw new UnauthorizedError("Invalid email or password");
-    }
+    const passwordHashToCompare = user?.password ?? DUMMY_PASSWORD_HASH;
+    const isPasswordValid = await bcrypt.compare(password, passwordHashToCompare);
 
-    const isPasswordValid = await bcrypt.compare(password, user.password);
-    if (!isPasswordValid) {
+    if (!user || !isPasswordValid) {
       throw new UnauthorizedError("Invalid email or password");
     }
 

@@ -2,13 +2,14 @@ import { prisma } from "../src/config/database.js";
 import { DEFAULT_ROLES } from "../src/permissions/permission.registry.js";
 import "../src/config/env.js";
 
-async function promoteUserToAdmin() {
+async function promoteUserToAdmin(): Promise<void> {
   const emailArg = process.argv[2];
 
   if (!emailArg || !emailArg.trim()) {
     console.error("Error: Please provide a user email address.");
     console.error("Usage: npm run user:promote-admin -- <email>");
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const normalizedEmail = emailArg.trim().toLowerCase();
@@ -20,7 +21,8 @@ async function promoteUserToAdmin() {
 
   if (!user) {
     console.error(`Error: User with email '${normalizedEmail}' not found.`);
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   const adminRole = await prisma.role.findUnique({
@@ -31,7 +33,8 @@ async function promoteUserToAdmin() {
     console.error(
       `Error: Role '${DEFAULT_ROLES.ADMIN}' not found in the database. Please run the seed script first.`
     );
-    process.exit(1);
+    process.exitCode = 1;
+    return;
   }
 
   // Idempotently assign ADMIN role without removing existing roles
@@ -57,7 +60,7 @@ async function promoteUserToAdmin() {
 promoteUserToAdmin()
   .catch((err) => {
     console.error("Unexpected error during admin promotion:", err);
-    process.exit(1);
+    process.exitCode = 1;
   })
   .finally(async () => {
     await prisma.$disconnect();

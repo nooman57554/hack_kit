@@ -11,26 +11,16 @@ authRouter.post(
   "/register",
   registerRateLimiter,
   validateBody(registerSchema),
-  (req, res, next) => {
-    authController.register(req, res, next);
-  }
+  authController.register
 );
 
 authRouter.post(
   "/login",
   loginRateLimiter,
   validateBody(loginSchema),
-  (req, res, next) => {
-    authController.login(req, res, next);
-  }
+  authController.login
 );
 
-authRouter.get(
-  "/me",
-  authenticate,
-  (req, res, next) => {
-    authController.me(req, res, next);
-  }
-);
+authRouter.get("/me", authenticate, authController.me);
 
 export default authRouter;
