@@ -39,6 +39,22 @@ export const PERMISSIONS = {
     key: "permissions.manage",
     description: "Manage system permissions",
   },
+  COURSES_READ: {
+    key: "courses.read",
+    description: "Read courses and course rule versions",
+  },
+  COURSES_MANAGE: {
+    key: "courses.manage",
+    description: "Create courses and publish rule versions",
+  },
+  BATCHES_IMPORT: {
+    key: "batches.import",
+    description: "Import candidate batches via CSV",
+  },
+  BATCHES_READ: {
+    key: "batches.read",
+    description: "Read batches and candidate qualification results",
+  },
 } as const;
 
 export type PermissionDefinition = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -51,6 +67,9 @@ export const DEFAULT_ROLES = {
   ADMIN: "ADMIN",
   MANAGER: "MANAGER",
   MEMBER: "MEMBER",
+  STATE_OFFICE: "STATE_OFFICE",
+  TRAINING_CENTER: "TRAINING_CENTER",
+  DISTRICT_OFFICER: "DISTRICT_OFFICER",
 } as const;
 
 export type DefaultRole = (typeof DEFAULT_ROLES)[keyof typeof DEFAULT_ROLES];
@@ -69,4 +88,15 @@ export const ROLE_PERMISSIONS_MATRIX: Record<DefaultRole, readonly PermissionKey
     PERMISSIONS.TASKS_CREATE.key,
     PERMISSIONS.TASKS_UPDATE.key,
   ],
+  [DEFAULT_ROLES.STATE_OFFICE]: [
+    PERMISSIONS.COURSES_READ.key,
+    PERMISSIONS.COURSES_MANAGE.key,
+    PERMISSIONS.BATCHES_READ.key,
+  ],
+  [DEFAULT_ROLES.TRAINING_CENTER]: [
+    PERMISSIONS.COURSES_READ.key,
+    PERMISSIONS.BATCHES_IMPORT.key,
+    PERMISSIONS.BATCHES_READ.key,
+  ],
+  [DEFAULT_ROLES.DISTRICT_OFFICER]: [],
 };

@@ -11,3 +11,25 @@ export function validateBody(schema: ZodSchema) {
     }
   };
 }
+
+export function validateParams(schema: ZodSchema) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await schema.parseAsync(req.params);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}
+
+export function validateQuery(schema: ZodSchema) {
+  return async (req: Request, _res: Response, next: NextFunction): Promise<void> => {
+    try {
+      await schema.parseAsync(req.query);
+      next();
+    } catch (error) {
+      next(error);
+    }
+  };
+}

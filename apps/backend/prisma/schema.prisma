@@ -7,16 +7,53 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model User {
-  id        String     @id @default(uuid())
-  name      String
-  email     String     @unique
-  password  String
-  createdAt DateTime   @default(now())
-  updatedAt DateTime   @updatedAt
-  userRoles UserRole[]
-  tasks     Task[]
+model District {
+  id              String           @id @default(uuid())
+  name            String
+  code            String           @unique
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
+  trainingCenters TrainingCenter[]
+  users           User[]
 
+  @@map("districts")
+}
+
+model TrainingCenter {
+  id         String      @id @default(uuid())
+  name       String
+  code       String      @unique
+  districtId String
+  district   District    @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  createdAt  DateTime    @default(now())
+  updatedAt  DateTime    @updatedAt
+  users      User[]
+  candidates Candidate[]
+  batches    Batch[]
+
+  @@index([districtId])
+  @@map("training_centers")
+}
+
+model User {
+  id                  String              @id @default(uuid())
+  name                String
+  email               String              @unique
+  password            String
+  districtId          String?
+  trainingCenterId    String?
+  district            District?           @relation(fields: [districtId], references: [id], onDelete: Restrict)
+  trainingCenter      TrainingCenter?     @relation(fields: [trainingCenterId], references: [id], onDelete: Restrict)
+  createdAt           DateTime            @default(now())
+  updatedAt           DateTime            @updatedAt
+  userRoles           UserRole[]
+  tasks               Task[]
+  createdRuleVersions CourseRuleVersion[]
+  createdBatches      Batch[]
+  auditLogs           AuditLog[]
+
+  @@index([districtId])
+  @@index([trainingCenterId])
   @@map("users")
 }
 
@@ -78,4 +115,125 @@ model Task {
 
   @@index([createdById])
   @@map("tasks")
+}
+
+model Course {
+  id                   String              @id @default(uuid())
+  code                 String              @unique
+  name                 String
+  currentRuleVersionId String?             @unique
+  currentRuleVersion   CourseRuleVersion?  @relation("CurrentCourseRule", fields: [currentRuleVersionId], references: [id], onDelete: Restrict)
+  createdAt            DateTime            @default(now())
+  updatedAt            DateTime            @updatedAt
+  ruleVersions         CourseRuleVersion[] @relation("CourseRuleVersions")
+  batches              Batch[]
+
+  @@map("courses")
+}
+
+model CourseRuleVersion {
+  id                   String   @id @default(uuid())
+  courseId             String
+  version              Int
+  minAttendancePercent Float
+  minMarksPercent      Float
+  practicalRequired    Boolean
+  minPracticalPercent  Float?
+  createdById          String
+  createdAt            DateTime @default(now())
+
+  course           Course  @relation("CourseRuleVersions", fields: [courseId], references: [id], onDelete: Restrict)
+  currentForCourse Course? @relation("CurrentCourseRule")
+  createdBy        User    @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  batches          Batch[]
+
+  @@unique([courseId, version])
+  @@index([courseId])
+  @@index([createdById])
+  @@map("course_rule_versions")
+}
+
+model Candidate {
+  id               String           @id @default(uuid())
+  trainingCenterId String
+  candidateRef     String
+  fullName         String
+  phone            String
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+  trainingCenter   TrainingCenter   @relation(fields: [trainingCenterId], references: [id], onDelete: Restrict)
+  batchCandidates  BatchCandidate[]
+
+  @@unique([trainingCenterId, candidateRef])
+  @@index([trainingCenterId])
+  @@map("candidates")
+}
+
+model Batch {
+  id               String              @id @default(uuid())
+  trainingCenterId String
+  courseId         String
+  ruleVersionId    String
+  status           String              @default("DRAFT")
+  createdById      String
+  createdAt        DateTime            @default(now())
+  submittedAt      DateTime?
+  trainingCenter   TrainingCenter      @relation(fields: [trainingCenterId], references: [id], onDelete: Restrict)
+  course           Course              @relation(fields: [courseId], references: [id], onDelete: Restrict)
+  ruleVersion      CourseRuleVersion   @relation(fields: [ruleVersionId], references: [id], onDelete: Restrict)
+  createdBy        User                @relation(fields: [createdById], references: [id], onDelete: Restrict)
+  candidates       BatchCandidate[]
+
+  @@index([trainingCenterId])
+  @@index([courseId])
+  @@index([ruleVersionId])
+  @@index([createdById])
+  @@map("batches")
+}
+
+model BatchCandidate {
+  id                   String    @id @default(uuid())
+  batchId              String
+  candidateId          String
+  attendancePercent    Float
+  marksPercent         Float
+  practicalPercent     Float?
+  qualified            Boolean
+  qualificationReasons Json
+  batch                Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  candidate            Candidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+
+  @@unique([batchId, candidateId])
+  @@index([candidateId])
+  @@map("batch_candidates")
+}
+
+model AuditLog {
+  id         String   @id @default(uuid())
+  actorId    String
+  action     String
+  entityType String
+  entityId   String
+  details    Json
+  createdAt  DateTime @default(now())
+  actor      User     @relation(fields: [actorId], references: [id], onDelete: Restrict)
+
+  @@index([actorId])
+  @@index([entityType, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+model OutboxEvent {
+  id          String    @id @default(uuid())
+  eventType   String
+  aggregateId String
+  payload     Json
+  createdAt   DateTime  @default(now())
+  publishedAt DateTime?
+  attempts    Int       @default(0)
+
+  @@index([publishedAt, createdAt])
+  @@index([aggregateId])
+  @@map("outbox_events")
 }
