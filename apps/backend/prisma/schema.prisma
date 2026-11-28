@@ -195,6 +195,9 @@ model BatchCandidate {
   id                   String    @id @default(uuid())
   batchId              String
   candidateId          String
+  candidateRefSnapshot String
+  fullNameSnapshot     String
+  phoneSnapshot        String
   attendancePercent    Float
   marksPercent         Float
   practicalPercent     Float?

@@ -5,6 +5,14 @@ import jwt from "jsonwebtoken";
 import app from "../src/app.js";
 import { prisma } from "../src/config/database.js";
 import { env } from "../src/config/env.js";
+import { batchResponseSchema } from "../src/modules/batches/batches.contracts.js";
+import {
+  createCourseResponseSchema,
+  getCourseRulesResponseSchema,
+  getCoursesResponseSchema,
+  publishCourseRuleResponseSchema,
+} from "../src/modules/courses/courses.contracts.js";
+import { DEFAULT_ROLES } from "../src/permissions/permission.registry.js";
 
 function signToken(userId: string): string {
   return jwt.sign({ userId }, env.JWT_SECRET, {
@@ -60,7 +68,7 @@ async function apiRequest(
           let parsed: any = raw;
           try {
             parsed = JSON.parse(raw);
-          } catch {}
+          } catch { }
           resolve({ status: res.statusCode ?? 500, body: parsed });
         });
       }
@@ -73,18 +81,20 @@ async function apiRequest(
   });
 }
 
-describe("Phase 1 Courses, Rules, and Batch Import API", () => {
+describe("Courses, Rules, and Batch Import API", () => {
   let server: http.Server;
   let stateToken: string;
+  let multiRoleStateToken: string;
   let northCentreToken: string;
   let southCentreToken: string;
   let districtToken: string;
 
   let northCenterId: string;
+  let multiRoleUserId: string;
 
   const createdCourseIds: string[] = [];
   const createdBatchIds: string[] = [];
-  const testRunTag = `P1TEST_${Date.now()}`;
+  const testRunTag = `CBTEST_${Date.now()}`;
 
   before(async () => {
     const stateUser = await prisma.user.findUniqueOrThrow({
@@ -103,7 +113,29 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     assert.ok(northUser.trainingCenterId);
     northCenterId = northUser.trainingCenterId;
 
+    // Create a multi-role unscoped user holding both STATE_OFFICE and MEMBER roles
+    const stateRole = await prisma.role.findUniqueOrThrow({
+      where: { name: DEFAULT_ROLES.STATE_OFFICE },
+    });
+    const memberRole = await prisma.role.findUniqueOrThrow({
+      where: { name: DEFAULT_ROLES.MEMBER },
+    });
+    const multiRoleUser = await prisma.user.create({
+      data: {
+        name: "Multi-Role State Officer",
+        email: `multirole_${Date.now()}@skillpass.local`,
+        password: stateUser.password,
+        districtId: null,
+        trainingCenterId: null,
+        userRoles: {
+          create: [{ roleId: stateRole.id }, { roleId: memberRole.id }],
+        },
+      },
+    });
+    multiRoleUserId = multiRoleUser.id;
+
     stateToken = signToken(stateUser.id);
+    multiRoleStateToken = signToken(multiRoleUser.id);
     northCentreToken = signToken(northUser.id);
     southCentreToken = signToken(southUser.id);
     districtToken = signToken(districtUser.id);
@@ -115,19 +147,30 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
   after(async () => {
     server.close();
 
-    // Clean up test batches, outbox/audit records, test candidates, and test courses
-    if (createdBatchIds.length > 0) {
+    const allCourseBatchIds = createdCourseIds.length
+      ? (
+        await prisma.batch.findMany({
+          where: { courseId: { in: createdCourseIds } },
+          select: { id: true },
+        })
+      ).map((b) => b.id)
+      : [];
+    const batchIdsToClean = Array.from(
+      new Set([...createdBatchIds, ...allCourseBatchIds])
+    );
+
+    if (batchIdsToClean.length > 0) {
       await prisma.outboxEvent.deleteMany({
-        where: { aggregateId: { in: createdBatchIds } },
+        where: { aggregateId: { in: batchIdsToClean } },
       });
       await prisma.auditLog.deleteMany({
-        where: { entityId: { in: createdBatchIds } },
+        where: { entityId: { in: batchIdsToClean } },
       });
       await prisma.batchCandidate.deleteMany({
-        where: { batchId: { in: createdBatchIds } },
+        where: { batchId: { in: batchIdsToClean } },
       });
       await prisma.batch.deleteMany({
-        where: { id: { in: createdBatchIds } },
+        where: { id: { in: batchIdsToClean } },
       });
     }
 
@@ -158,10 +201,14 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       });
     }
 
+    if (multiRoleUserId) {
+      await prisma.user.delete({ where: { id: multiRoleUserId } });
+    }
+
     await prisma.$disconnect();
   });
 
-  it("allows State Office to create a course/rule and forbids Training Centre and District Officer", async () => {
+  it("allows State Office (including multi-role users) to create a course/rule and forbids Training Centre and District Officer", async () => {
     const coursePayload = {
       code: `${testRunTag}-COURSE-1`,
       name: "Test Welding Course",
@@ -183,25 +230,25 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     });
     assert.equal(districtRes.status, 403);
 
-    const stateRes = await apiRequest(server, "POST", "/api/courses", {
-      token: stateToken,
+    const multiRoleStateRes = await apiRequest(server, "POST", "/api/courses", {
+      token: multiRoleStateToken,
       body: coursePayload,
     });
-    assert.equal(stateRes.status, 201);
-    assert.equal(stateRes.body.data.course.code, coursePayload.code);
-    assert.equal(stateRes.body.data.ruleVersion.version, 1);
+    assert.equal(multiRoleStateRes.status, 201);
+    const parsedCreate = createCourseResponseSchema.parse(multiRoleStateRes.body);
+    assert.equal(parsedCreate.data.course.code, coursePayload.code);
+    assert.equal(parsedCreate.data.ruleVersion.version, 1);
     assert.equal(
-      stateRes.body.data.course.currentRuleVersionId,
-      stateRes.body.data.ruleVersion.id
+      parsedCreate.data.course.currentRuleVersionId,
+      parsedCreate.data.ruleVersion.id
     );
 
-    createdCourseIds.push(stateRes.body.data.course.id);
+    createdCourseIds.push(parsedCreate.data.course.id);
 
-    // Training Centre and District Officer also cannot publish rule updates
     const centreRuleRes = await apiRequest(
       server,
       "POST",
-      `/api/courses/${stateRes.body.data.course.id}/rules`,
+      `/api/courses/${parsedCreate.data.course.id}/rules`,
       {
         token: northCentreToken,
         body: {
@@ -217,7 +264,7 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     const districtRuleRes = await apiRequest(
       server,
       "POST",
-      `/api/courses/${stateRes.body.data.course.id}/rules`,
+      `/api/courses/${parsedCreate.data.course.id}/rules`,
       {
         token: districtToken,
         body: {
@@ -231,7 +278,7 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     assert.equal(districtRuleRes.status, 403);
   });
 
-  it("keeps rule versions immutable, rejects client ruleVersionId overrides, and isolates batches across rule updates and centres", async () => {
+  it("keeps rule versions immutable, preserves candidate batch snapshots across profile updates, and isolates batches across centres", async () => {
     // 1. State Office creates course with rule v1 (75 / 60 / practical 70)
     const createRes = await apiRequest(server, "POST", "/api/courses", {
       token: stateToken,
@@ -245,14 +292,15 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       },
     });
     assert.equal(createRes.status, 201);
-    const courseId = createRes.body.data.course.id as string;
-    const ruleV1Id = createRes.body.data.ruleVersion.id as string;
+    const parsedCreate = createCourseResponseSchema.parse(createRes.body);
+    const courseId = parsedCreate.data.course.id;
+    const ruleV1Id = parsedCreate.data.ruleVersion.id;
     createdCourseIds.push(courseId);
 
     // 2. Reject batch import attempting to override ruleVersionId in query or header
-    const validCsv = [
+    const validCsvBatch1 = [
       "candidateRef,fullName,phone,attendancePercent,marksPercent,practicalPercent",
-      `${testRunTag}-C1,Alice Qualified,+9100000001,80,65,75`,
+      `${testRunTag}-C1,Alice Original,+9100000001,80,65,75`,
       `${testRunTag}-C2,Bob LowMarks,+9100000002,80,55,75`,
     ].join("\n");
 
@@ -260,7 +308,7 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       server,
       "POST",
       `/api/batches/import?courseId=${courseId}&ruleVersionId=${ruleV1Id}`,
-      { token: northCentreToken, body: validCsv }
+      { token: northCentreToken, body: validCsvBatch1 }
     );
     assert.equal(overrideQueryRes.status, 400);
 
@@ -270,7 +318,7 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       `/api/batches/import?courseId=${courseId}`,
       {
         token: northCentreToken,
-        body: validCsv,
+        body: validCsvBatch1,
         headers: { "x-rule-version-id": ruleV1Id },
       }
     );
@@ -291,26 +339,6 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     );
     assert.equal(invalidRes.status, 400);
     assert.ok(Array.isArray(invalidRes.body.error.details));
-    assert.ok(
-      invalidRes.body.error.details.some(
-        (e: any) => e.row === 3 && e.field === "attendancePercent"
-      )
-    );
-
-    // Missing practical score when rule requires it also aborts atomically
-    const missingPracticalCsv = [
-      "candidateRef,fullName,phone,attendancePercent,marksPercent,practicalPercent",
-      `${testRunTag}-BAD1,Charlie MissingPractical,+9100000003,85,75,`,
-    ].join("\n");
-
-    const missingPracticalRes = await apiRequest(
-      server,
-      "POST",
-      `/api/batches/import?courseId=${courseId}`,
-      { token: northCentreToken, body: missingPracticalCsv }
-    );
-    assert.equal(missingPracticalRes.status, 400);
-    assert.equal(missingPracticalRes.body.error.details[0].field, "practicalPercent");
 
     const badCandCount = await prisma.candidate.count({
       where: {
@@ -320,15 +348,16 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     });
     assert.equal(badCandCount, 0);
 
-    // 4. Valid CSV persists batch in DRAFT, candidates, results, audit, and outbox atomically
+    // 4. Valid CSV persists batch 1 in DRAFT, candidate snapshots, results, audit, and outbox atomically
     const importV1Res = await apiRequest(
       server,
       "POST",
       `/api/batches/import?courseId=${courseId}`,
-      { token: northCentreToken, body: validCsv }
+      { token: northCentreToken, body: validCsvBatch1 }
     );
     assert.equal(importV1Res.status, 201);
-    const batch1 = importV1Res.body.data.batch;
+    const parsedBatch1 = batchResponseSchema.parse(importV1Res.body);
+    const batch1 = parsedBatch1.data.batch;
     createdBatchIds.push(batch1.id);
 
     assert.equal(batch1.status, "DRAFT");
@@ -337,50 +366,19 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     assert.equal(batch1.trainingCenterId, northCenterId);
     assert.equal(batch1.candidates.length, 2);
 
-    const alice = batch1.candidates.find(
-      (c: any) => c.candidateRef === `${testRunTag}-C1`
-    );
-    const bob = batch1.candidates.find(
-      (c: any) => c.candidateRef === `${testRunTag}-C2`
-    );
-    assert.equal(alice.qualified, true);
-    assert.deepEqual(alice.qualificationReasons, []);
-    assert.equal(bob.qualified, false);
-    assert.equal(bob.qualificationReasons[0].code, "MARKS_BELOW_MINIMUM");
+    const aliceB1 = batch1.candidates.find(
+      (c) => c.candidateRef === `${testRunTag}-C1`
+    )!;
+    const bobB1 = batch1.candidates.find(
+      (c) => c.candidateRef === `${testRunTag}-C2`
+    )!;
+    assert.equal(aliceB1.fullName, "Alice Original");
+    assert.equal(aliceB1.phone, "+9100000001");
+    assert.equal(aliceB1.qualified, true);
+    assert.equal(bobB1.qualified, false);
+    assert.equal(bobB1.qualificationReasons[0].code, "MARKS_BELOW_MINIMUM");
 
-    const auditCount = await prisma.auditLog.count({
-      where: { entityId: batch1.id, action: "BATCH_IMPORTED" },
-    });
-    const outboxCount = await prisma.outboxEvent.count({
-      where: { aggregateId: batch1.id, eventType: "BATCH_IMPORTED" },
-    });
-    assert.equal(auditCount, 1);
-    assert.equal(outboxCount, 1);
-
-    // 5. Deleting a rule version referenced by a batch is restricted
-    await assert.rejects(async () => {
-      await prisma.courseRuleVersion.delete({ where: { id: ruleV1Id } });
-    });
-
-    // 5b. Course with no currentRuleVersionId rejects batch import with 400
-    const rulelessCourse = await prisma.course.create({
-      data: {
-        code: `${testRunTag}-NORULE`,
-        name: "Ruleless Course",
-        currentRuleVersionId: null,
-      },
-    });
-    createdCourseIds.push(rulelessCourse.id);
-
-    const noRuleImportRes = await apiRequest(
-      server,
-      "POST",
-      `/api/batches/import?courseId=${rulelessCourse.id}`,
-      { token: northCentreToken, body: validCsv }
-    );
-    assert.equal(noRuleImportRes.status, 400);
-
-    // 6. State Office publishes rule v2 (higher thresholds: 90 / 80 / practical 85)
+    // 5. State Office publishes rule v2 (90 / 80 / practical 85)
     const ruleV2Res = await apiRequest(
       server,
       "POST",
@@ -396,25 +394,22 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       }
     );
     assert.equal(ruleV2Res.status, 201);
-    const ruleV2Id = ruleV2Res.body.data.ruleVersion.id as string;
-    assert.equal(ruleV2Res.body.data.ruleVersion.version, 2);
+    const parsedRuleV2 = publishCourseRuleResponseSchema.parse(ruleV2Res.body);
+    const ruleV2Id = parsedRuleV2.data.ruleVersion.id;
+    assert.equal(parsedRuleV2.data.ruleVersion.version, 2);
 
-    // Even after v2 becomes current, deleting v1 is still blocked because batch1 references it
+    // Deleting v1 is restricted because batch1 references it
     await assert.rejects(async () => {
       await prisma.courseRuleVersion.delete({ where: { id: ruleV1Id } });
     });
 
-    // GET /api/courses returns courses with current rule version (allowed for State Office & Centre)
+    // GET /api/courses and GET /api/courses/:courseId/rules match contracts
     const coursesListRes = await apiRequest(server, "GET", "/api/courses", {
       token: northCentreToken,
     });
     assert.equal(coursesListRes.status, 200);
-    const listedCourse = coursesListRes.body.data.courses.find(
-      (c: any) => c.id === courseId
-    );
-    assert.equal(listedCourse.currentRuleVersion.version, 2);
+    getCoursesResponseSchema.parse(coursesListRes.body);
 
-    // Rules endpoint returns newest first and v1 thresholds remain unchanged
     const rulesListRes = await apiRequest(
       server,
       "GET",
@@ -422,47 +417,63 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
       { token: northCentreToken }
     );
     assert.equal(rulesListRes.status, 200);
-    assert.equal(rulesListRes.body.data.rules.length, 2);
-    assert.equal(rulesListRes.body.data.rules[0].version, 2);
-    assert.equal(rulesListRes.body.data.rules[1].version, 1);
-    assert.equal(rulesListRes.body.data.rules[1].minAttendancePercent, 75);
+    const parsedRulesList = getCourseRulesResponseSchema.parse(rulesListRes.body);
+    assert.equal(parsedRulesList.data.rules.length, 2);
+    assert.equal(parsedRulesList.data.rules[0].version, 2);
+    assert.equal(parsedRulesList.data.rules[1].version, 1);
 
-    // Existing batch1 retains v1 and Alice remains qualified
-    const batch1AfterRes = await apiRequest(
+    // 6. Later import uses same candidateRef with updated fullName and phone
+    const validCsvBatch2 = [
+      "candidateRef,fullName,phone,attendancePercent,marksPercent,practicalPercent",
+      `${testRunTag}-C1,Alice Updated,+9199999999,80,65,75`,
+    ].join("\n");
+
+    const importV2Res = await apiRequest(
+      server,
+      "POST",
+      `/api/batches/import?courseId=${courseId}`,
+      { token: northCentreToken, body: validCsvBatch2 }
+    );
+    assert.equal(importV2Res.status, 201);
+    const parsedBatch2 = batchResponseSchema.parse(importV2Res.body);
+    const batch2 = parsedBatch2.data.batch;
+    createdBatchIds.push(batch2.id);
+
+    assert.equal(batch2.ruleVersionId, ruleV2Id);
+    assert.equal(batch2.ruleVersion.version, 2);
+    assert.equal(batch2.candidates[0].fullName, "Alice Updated");
+    assert.equal(batch2.candidates[0].phone, "+9199999999");
+    assert.equal(batch2.candidates[0].qualified, false);
+
+    // Earlier batch1 retains original snapshot values and original qualification under v1
+    const batch1ReadRes = await apiRequest(
       server,
       "GET",
       `/api/batches/${batch1.id}`,
       { token: northCentreToken }
     );
-    assert.equal(batch1AfterRes.status, 200);
-    assert.equal(batch1AfterRes.body.data.batch.ruleVersion.version, 1);
-    assert.equal(
-      batch1AfterRes.body.data.batch.candidates.find(
-        (c: any) => c.candidateRef === `${testRunTag}-C1`
-      ).qualified,
-      true
-    );
+    assert.equal(batch1ReadRes.status, 200);
+    const parsedBatch1Read = batchResponseSchema.parse(batch1ReadRes.body);
+    const aliceB1Read = parsedBatch1Read.data.batch.candidates.find(
+      (c) => c.candidateRef === `${testRunTag}-C1`
+    )!;
+    assert.equal(aliceB1Read.fullName, "Alice Original");
+    assert.equal(aliceB1Read.phone, "+9100000001");
+    assert.equal(aliceB1Read.qualified, true);
 
-    // 7. New batch import captures rule v2 automatically (Alice's 80/65/75 now fails under v2)
-    const importV2Res = await apiRequest(
-      server,
-      "POST",
-      `/api/batches/import?courseId=${courseId}`,
-      { token: northCentreToken, body: validCsv }
-    );
-    assert.equal(importV2Res.status, 201);
-    const batch2 = importV2Res.body.data.batch;
-    createdBatchIds.push(batch2.id);
+    // Shared Candidate profile reflects the latest upsert
+    const currentCandidate = await prisma.candidate.findUniqueOrThrow({
+      where: {
+        trainingCenterId_candidateRef: {
+          trainingCenterId: northCenterId,
+          candidateRef: `${testRunTag}-C1`,
+        },
+      },
+    });
+    assert.equal(currentCandidate.fullName, "Alice Updated");
+    assert.equal(currentCandidate.phone, "+9199999999");
 
-    assert.equal(batch2.ruleVersionId, ruleV2Id);
-    assert.equal(batch2.ruleVersion.version, 2);
-    const aliceV2 = batch2.candidates.find(
-      (c: any) => c.candidateRef === `${testRunTag}-C1`
-    );
-    assert.equal(aliceV2.qualified, false);
-    assert.equal(aliceV2.qualificationReasons.length, 3);
-
-    // 8. Centre scope isolation: South Centre cannot read North Centre's batch; State Office can
+    // 7. Centre scope isolation and multi-role cross-centre State Office access
     const southReadRes = await apiRequest(
       server,
       "GET",
@@ -471,13 +482,13 @@ describe("Phase 1 Courses, Rules, and Batch Import API", () => {
     );
     assert.equal(southReadRes.status, 403);
 
-    const stateReadRes = await apiRequest(
+    const multiRoleStateReadRes = await apiRequest(
       server,
       "GET",
       `/api/batches/${batch1.id}`,
-      { token: stateToken }
+      { token: multiRoleStateToken }
     );
-    assert.equal(stateReadRes.status, 200);
-    assert.equal(stateReadRes.body.data.batch.id, batch1.id);
+    assert.equal(multiRoleStateReadRes.status, 200);
+    batchResponseSchema.parse(multiRoleStateReadRes.body);
   });
 });

@@ -19,13 +19,13 @@ const ROLE_DESCRIPTIONS: Record<DefaultRole, string> = {
   [DEFAULT_ROLES.TRAINING_CENTER]:
     "Training Centre operator for centre-scoped batch CSV imports and result viewing",
   [DEFAULT_ROLES.DISTRICT_OFFICER]:
-    "District Officer authority (no Phase 1 course or batch actions)",
+    "District Officer authority",
 };
 
 const DEMO_PASSWORD_PLAINTEXT = process.env.DEMO_USER_PASSWORD || "SkillPassDemo123!";
 
 async function main(): Promise<void> {
-  console.log("Seeding database permissions, roles, and Phase 1 demo data...");
+  console.log("Seeding database permissions, roles, and demo data...");
 
   // 1. Upsert all registered permissions
   const permissionMap = new Map<string, string>();

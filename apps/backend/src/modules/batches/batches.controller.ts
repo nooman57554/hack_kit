@@ -1,4 +1,8 @@
 import { Request, Response } from "express";
+import {
+  getBatchImportCenterIdFromRequest,
+  getBatchReadScopeFromRequest,
+} from "../../permissions/batch-scope.policy.js";
 import { BadRequestError, UnauthorizedError } from "../../utils/errors.js";
 import { batchesService } from "./batches.service.js";
 
@@ -18,10 +22,16 @@ export class BatchesController {
       );
     }
 
+    const trainingCenterId = getBatchImportCenterIdFromRequest(req);
     const courseId = String(req.query.courseId);
     const rawCsv = typeof req.body === "string" ? req.body : "";
 
-    const batch = await batchesService.importBatch(req.user.id, courseId, rawCsv);
+    const batch = await batchesService.importBatch(
+      req.user.id,
+      trainingCenterId,
+      courseId,
+      rawCsv
+    );
     res.status(201).json({
       success: true,
       data: { batch },
@@ -29,12 +39,9 @@ export class BatchesController {
   };
 
   getBatchById = async (req: Request, res: Response): Promise<void> => {
-    if (!req.user?.id) {
-      throw new UnauthorizedError("User is not authenticated");
-    }
-
+    const scope = getBatchReadScopeFromRequest(req);
     const batchId = String(req.params.batchId);
-    const batch = await batchesService.getBatchById(req.user.id, batchId);
+    const batch = await batchesService.getBatchById(batchId, scope);
     res.status(200).json({
       success: true,
       data: { batch },

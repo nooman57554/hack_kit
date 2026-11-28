@@ -10,12 +10,14 @@ export function requirePermission(permissionKey: PermissionKey) {
         return next(new UnauthorizedError("User is not authenticated"));
       }
 
-      // Load user roles and permissions once per request
+      // Load user roles, scope, and permissions once per request
       if (!req.userPermissions) {
         const user = await prisma.user.findUnique({
           where: { id: req.user.id },
           select: {
             id: true,
+            districtId: true,
+            trainingCenterId: true,
             userRoles: {
               select: {
                 role: {
@@ -52,6 +54,8 @@ export function requirePermission(permissionKey: PermissionKey) {
         }
 
         req.user.roles = roles;
+        req.user.districtId = user.districtId;
+        req.user.trainingCenterId = user.trainingCenterId;
         req.userPermissions = permissions;
       }
 

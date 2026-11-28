@@ -1,6 +1,6 @@
 import { Prisma } from "@prisma/client";
 import { prisma } from "../../config/database.js";
-import { DEFAULT_ROLES } from "../../permissions/permission.registry.js";
+import type { BatchReadScope } from "../../permissions/batch-scope.policy.js";
 import {
   AppError,
   BadRequestError,
@@ -47,32 +47,26 @@ const batchInclude = {
   },
   candidates: {
     orderBy: {
-      candidate: {
-        candidateRef: "asc" as const,
-      },
+      candidateRefSnapshot: "asc",
     },
     select: {
       id: true,
       candidateId: true,
+      candidateRefSnapshot: true,
+      fullNameSnapshot: true,
+      phoneSnapshot: true,
       attendancePercent: true,
       marksPercent: true,
       practicalPercent: true,
       qualified: true,
       qualificationReasons: true,
-      candidate: {
-        select: {
-          candidateRef: true,
-          fullName: true,
-          phone: true,
-        },
-      },
     },
   },
 } as const;
 
 type BatchWithDetails = Prisma.BatchGetPayload<{ include: typeof batchInclude }>;
 
-function formatBatchResponse(batch: BatchWithDetails) {
+export function formatBatchResponse(batch: BatchWithDetails) {
   return {
     id: batch.id,
     trainingCenterId: batch.trainingCenterId,
@@ -88,9 +82,9 @@ function formatBatchResponse(batch: BatchWithDetails) {
     candidates: batch.candidates.map((entry) => ({
       id: entry.id,
       candidateId: entry.candidateId,
-      candidateRef: entry.candidate.candidateRef,
-      fullName: entry.candidate.fullName,
-      phone: entry.candidate.phone,
+      candidateRef: entry.candidateRefSnapshot,
+      fullName: entry.fullNameSnapshot,
+      phone: entry.phoneSnapshot,
       attendancePercent: entry.attendancePercent,
       marksPercent: entry.marksPercent,
       practicalPercent: entry.practicalPercent,
@@ -101,7 +95,12 @@ function formatBatchResponse(batch: BatchWithDetails) {
 }
 
 export class BatchesService {
-  async importBatch(actorId: string, courseId: string, rawCsv: string) {
+  async importBatch(
+    actorId: string,
+    trainingCenterId: string,
+    courseId: string,
+    rawCsv: string
+  ) {
     // 1. Parse and validate entire CSV before opening a write transaction
     const { errors, rows } = parseAndValidateBatchCsv(rawCsv);
     if (errors.length > 0) {
@@ -109,7 +108,7 @@ export class BatchesService {
     }
 
     return prisma.$transaction(async (tx) => {
-      // 2. Verify authenticated user's centre scope
+      // 2. Verify authenticated user's centre scope against the authorized scope
       const actor = await tx.user.findUnique({
         where: { id: actorId },
         select: {
@@ -123,13 +122,15 @@ export class BatchesService {
         throw new UnauthorizedError("Authenticated user no longer exists");
       }
 
-      if (actor.districtId !== null || actor.trainingCenterId === null) {
+      if (
+        actor.districtId !== null ||
+        actor.trainingCenterId === null ||
+        actor.trainingCenterId !== trainingCenterId
+      ) {
         throw new ForbiddenError(
           "Only Training Centre users with an assigned centre scope can import batches"
         );
       }
-
-      const trainingCenterId = actor.trainingCenterId;
 
       // 3. Lock the course row (FOR SHARE) to read one consistent, committed currentRuleVersionId
       const lockedCourses = await tx.$queryRaw<
@@ -185,7 +186,7 @@ export class BatchesService {
         },
       });
 
-      // 6. Upsert candidates and create BatchCandidate qualification records
+      // 6. Upsert candidates and create BatchCandidate records with immutable CSV snapshots
       let qualifiedCount = 0;
 
       for (const row of rows) {
@@ -230,6 +231,9 @@ export class BatchesService {
           data: {
             batchId: batch.id,
             candidateId: candidate.id,
+            candidateRefSnapshot: row.candidateRef,
+            fullNameSnapshot: row.fullName,
+            phoneSnapshot: row.phone,
             attendancePercent: row.attendancePercent,
             marksPercent: row.marksPercent,
             practicalPercent: row.practicalPercent,
@@ -285,33 +289,7 @@ export class BatchesService {
     });
   }
 
-  async getBatchById(actorId: string, batchId: string) {
-    const actor = await prisma.user.findUnique({
-      where: { id: actorId },
-      select: {
-        id: true,
-        districtId: true,
-        trainingCenterId: true,
-        userRoles: {
-          select: {
-            role: {
-              select: {
-                name: true,
-              },
-            },
-          },
-        },
-      },
-    });
-
-    if (!actor) {
-      throw new UnauthorizedError("Authenticated user no longer exists");
-    }
-
-    if (actor.districtId !== null && actor.trainingCenterId !== null) {
-      throw new ForbiddenError("Invalid user scope configuration");
-    }
-
+  async getBatchById(batchId: string, scope: BatchReadScope) {
     const batch = await prisma.batch.findUnique({
       where: { id: batchId },
       include: batchInclude,
@@ -321,22 +299,10 @@ export class BatchesService {
       throw new NotFoundError("Batch not found");
     }
 
-    const roleNames = new Set(actor.userRoles.map((ur) => ur.role.name));
-    const isCrossCentreAuthority =
-      (roleNames.has(DEFAULT_ROLES.STATE_OFFICE) ||
-        roleNames.has(DEFAULT_ROLES.ADMIN)) &&
-      actor.districtId === null &&
-      actor.trainingCenterId === null;
-
-    if (!isCrossCentreAuthority) {
-      if (actor.trainingCenterId === null) {
-        throw new ForbiddenError("Insufficient scope to view this batch");
-      }
-      if (batch.trainingCenterId !== actor.trainingCenterId) {
-        throw new ForbiddenError(
-          "You can only access batches belonging to your training centre"
-        );
-      }
+    if (!scope.crossCenter && batch.trainingCenterId !== scope.trainingCenterId) {
+      throw new ForbiddenError(
+        "You can only access batches belonging to your training centre"
+      );
     }
 
     return formatBatchResponse(batch);

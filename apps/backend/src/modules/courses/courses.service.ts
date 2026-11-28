@@ -21,7 +21,7 @@ const ruleVersionSelect = {
 } as const;
 
 export class CoursesService {
-  private async assertStateOfficeScope(actorId: string): Promise<void> {
+  private async assertUnscopedCourseAuthority(actorId: string): Promise<void> {
     const actor = await prisma.user.findUnique({
       where: { id: actorId },
       select: {
@@ -37,7 +37,7 @@ export class CoursesService {
 
     if (actor.districtId !== null || actor.trainingCenterId !== null) {
       throw new ForbiddenError(
-        "Only State Office users without centre or district scope can manage courses and rules"
+        "Users with a training centre or district scope cannot manage courses and rules"
       );
     }
   }
@@ -60,7 +60,7 @@ export class CoursesService {
   }
 
   async createCourse(actorId: string, input: CreateCourseInput) {
-    await this.assertStateOfficeScope(actorId);
+    await this.assertUnscopedCourseAuthority(actorId);
 
     const minPracticalPercent = input.practicalRequired
       ? input.minPracticalPercent!
@@ -146,7 +146,7 @@ export class CoursesService {
     courseId: string,
     input: CreateCourseRuleInput
   ) {
-    await this.assertStateOfficeScope(actorId);
+    await this.assertUnscopedCourseAuthority(actorId);
 
     const minPracticalPercent = input.practicalRequired
       ? input.minPracticalPercent!
