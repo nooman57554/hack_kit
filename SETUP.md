@@ -66,7 +66,7 @@ docker compose logs -f backend
 Stop containers while preserving database data:
 
 ```bash
-docker compose down
+docker rm -f hackkit-frontend hackkit-backend hackkit-postgres
 ```
 
 Stop containers **and delete the PostgreSQL data volume** for a clean reset:
