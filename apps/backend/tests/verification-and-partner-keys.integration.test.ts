@@ -16,7 +16,10 @@ import {
 } from "../src/modules/partner-keys/partner-keys.contracts.js";
 import { PARTNER_KEY_SCOPES } from "../src/modules/partner-keys/partner-keys.crypto.js";
 import { PartnerKeysService } from "../src/modules/partner-keys/partner-keys.service.js";
-import { verifyCertificateResponseSchema } from "../src/modules/verification/verification.contracts.js";
+import {
+  bulkVerifyCertificatesResponseSchema,
+  verifyCertificateResponseSchema,
+} from "../src/modules/verification/verification.contracts.js";
 import { verificationController } from "../src/modules/verification/verification.controller.js";
 import { createPartnerVerifyRateLimiter } from "../src/modules/verification/verification.limiter.js";
 
@@ -352,9 +355,9 @@ describe("Public Verification, Partner Verification API, and Admin Partner Key M
     assert.deepEqual(partialRes.body, unknownRes.body);
   });
 
-  it("enforces ADMIN RBAC, single-disclosure creation, secret-free listing/audit, and immediate idempotent revocation", async () => {
-    // Non-admin and unauthenticated callers are blocked
-    for (const badToken of [stateToken, northCentreToken, districtToken]) {
+  it("enforces ADMIN and STATE_OFFICE RBAC, read-only separation, single-disclosure creation, secret-free listing/audit, and immediate idempotent revocation", async () => {
+    // Non-privileged roles and unauthenticated callers are blocked
+    for (const badToken of [northCentreToken, districtToken]) {
       const createDenied = await apiRequest(server, "POST", "/api/partner-keys", {
         token: badToken,
         body: { name: "Unauthorized Attempt" },
@@ -390,6 +393,86 @@ describe("Public Verification, Partner Verification API, and Admin Partner Key M
     });
     assert.equal(pastExpiryRes.status, 400);
 
+    // State Office user can create, list, and revoke partner keys
+    const stateCreateRes = await apiRequest(
+      server,
+      "POST",
+      "/api/partner-keys",
+      {
+        token: stateToken,
+        body: { name: `State Office Key ${testRunTag}` },
+      }
+    );
+    assert.equal(stateCreateRes.status, 201);
+    const parsedStateCreate = createPartnerKeyResponseSchema.parse(
+      stateCreateRes.body
+    );
+    const stateKeyId = parsedStateCreate.data.partnerKey.id;
+    createdKeyIds.push(stateKeyId);
+
+    const stateListRes = await apiRequest(server, "GET", "/api/partner-keys", {
+      token: stateToken,
+    });
+    assert.equal(stateListRes.status, 200);
+    assert.equal(
+      JSON.stringify(stateListRes.body).includes(parsedStateCreate.data.apiKey),
+      false
+    );
+
+    // Read-only user with partner_keys.read can list keys, but cannot create or revoke
+    const readPerm = await prisma.permission.findUniqueOrThrow({
+      where: { key: "partner_keys.read" },
+    });
+    const readOnlyRole = await prisma.role.create({
+      data: {
+        name: `PK_READ_ONLY_${testRunTag}`,
+        rolePermissions: {
+          create: { permissionId: readPerm.id },
+        },
+      },
+    });
+    const readOnlyUser = await prisma.user.create({
+      data: {
+        name: "Read Only Key Viewer",
+        email: `pk.readonly.${testRunTag}@skillpass.local`,
+        password: "unused",
+        userRoles: { create: { roleId: readOnlyRole.id } },
+      },
+    });
+    const readOnlyToken = signToken(readOnlyUser.id);
+    try {
+      const roList = await apiRequest(server, "GET", "/api/partner-keys", {
+        token: readOnlyToken,
+      });
+      assert.equal(roList.status, 200);
+
+      const roCreate = await apiRequest(server, "POST", "/api/partner-keys", {
+        token: readOnlyToken,
+        body: { name: "Blocked Create" },
+      });
+      assert.equal(roCreate.status, 403);
+
+      const roRevoke = await apiRequest(
+        server,
+        "POST",
+        `/api/partner-keys/${stateKeyId}/revoke`,
+        { token: readOnlyToken }
+      );
+      assert.equal(roRevoke.status, 403);
+    } finally {
+      await prisma.user.delete({ where: { id: readOnlyUser.id } });
+      await prisma.role.delete({ where: { id: readOnlyRole.id } });
+    }
+
+    const stateRevokeRes = await apiRequest(
+      server,
+      "POST",
+      `/api/partner-keys/${stateKeyId}/revoke`,
+      { token: stateToken }
+    );
+    assert.equal(stateRevokeRes.status, 200);
+    assert.equal(stateRevokeRes.body.data.partnerKey.status, "REVOKED");
+
     // Admin creates valid key
     const createRes = await apiRequest(server, "POST", "/api/partner-keys", {
       token: adminToken,
@@ -424,12 +507,12 @@ describe("Public Verification, Partner Verification API, and Admin Partner Key M
     assert.notEqual(dbRow.secretHash, rawApiKey);
     assert.equal(dbRow.secretHash.includes(rawApiKey.split(".")[1]!), false);
 
-    // Revoke idempotently and verify non-admin cannot revoke
+    // Revoke idempotently and verify unauthorized roles cannot revoke
     const revokeForbidden = await apiRequest(
       server,
       "POST",
       `/api/partner-keys/${createdKeyId}/revoke`,
-      { token: stateToken }
+      { token: northCentreToken }
     );
     assert.equal(revokeForbidden.status, 403);
 
@@ -798,5 +881,181 @@ describe("Public Verification, Partner Verification API, and Admin Partner Key M
       });
       await prisma.course.delete({ where: { id: tempCourseId } });
     }
+  });
+
+  it("supports bulk partner verification in exact order with duplicate preservation, validation, and per-key rate limiting", async () => {
+    const bulkKeyRes = await apiRequest(server, "POST", "/api/partner-keys", {
+      token: stateToken,
+      body: { name: `Bulk Verify Partner ${testRunTag}` },
+    });
+    assert.equal(bulkKeyRes.status, 201);
+    const bulkKeyId = bulkKeyRes.body.data.partnerKey.id;
+    const bulkApiKey = bulkKeyRes.body.data.apiKey;
+    createdKeyIds.push(bulkKeyId);
+
+    // Missing / invalid / expired / revoked / unscoped keys rejected
+    const missingBulk = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      { body: { verificationCodes: [issuedCode] } }
+    );
+    assert.equal(missingBulk.status, 401);
+
+    const badBulkKey = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      {
+        apiKey: "sppk_000000000000.AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
+        body: { verificationCodes: [issuedCode] },
+      }
+    );
+    assert.equal(badBulkKey.status, 401);
+
+    // Validation: empty array, whitespace string, >100 items, malformed extra keys
+    const emptyArr = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      { apiKey: bulkApiKey, body: { verificationCodes: [] } }
+    );
+    assert.equal(emptyArr.status, 400);
+
+    const blankCode = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      { apiKey: bulkApiKey, body: { verificationCodes: ["   "] } }
+    );
+    assert.equal(blankCode.status, 400);
+
+    const oversized = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      {
+        apiKey: bulkApiKey,
+        body: {
+          verificationCodes: Array.from(
+            { length: 101 },
+            (_, idx) => `SP-${idx.toString(16).padStart(8, "0").toUpperCase()}-00000000`
+          ),
+        },
+      }
+    );
+    assert.equal(oversized.status, 400);
+
+    // Mixed issued, revoked, unknown, and duplicate codes preserve exact order
+    const [singleIssued, singleRevoked, bulkMixed] = await Promise.all([
+      apiRequest(
+        server,
+        "GET",
+        `/api/partner/v1/certificates/verify/${issuedCode}`,
+        { apiKey: bulkApiKey }
+      ),
+      apiRequest(
+        server,
+        "GET",
+        `/api/partner/v1/certificates/verify/${revokedCode}`,
+        { apiKey: bulkApiKey }
+      ),
+      apiRequest(
+        server,
+        "POST",
+        "/api/partner/v1/certificates/verify-bulk",
+        {
+          apiKey: bulkApiKey,
+          body: {
+            verificationCodes: [
+              `  ${issuedCode}  `,
+              "SP-00000000-00000000",
+              revokedCode,
+              issuedCode,
+            ],
+          },
+        }
+      ),
+    ]);
+
+    assert.equal(singleIssued.status, 200);
+    assert.equal(singleRevoked.status, 200);
+    assert.equal(bulkMixed.status, 200);
+    assert.match(String(bulkMixed.headers["cache-control"]), /no-store/);
+
+    const parsedBulk = bulkVerifyCertificatesResponseSchema.parse(bulkMixed.body);
+    assert.equal(parsedBulk.data.results.length, 4);
+
+    assert.deepEqual(parsedBulk.data.results[0], {
+      found: true,
+      ...singleIssued.body.data,
+    });
+    assert.deepEqual(parsedBulk.data.results[1], {
+      verificationCode: "SP-00000000-00000000",
+      found: false,
+    });
+    assert.deepEqual(parsedBulk.data.results[2], {
+      found: true,
+      ...singleRevoked.body.data,
+    });
+    assert.deepEqual(parsedBulk.data.results[3], {
+      found: true,
+      ...singleIssued.body.data,
+    });
+
+    const serializedBulk = JSON.stringify(bulkMixed.body);
+    assert.equal(serializedBulk.includes("Alice"), false);
+    assert.equal(serializedBulk.includes("sensitive audit remarks"), false);
+    assert.equal(serializedBulk.includes(issuedCertId), false);
+
+    // Rate limit enforced per authenticated partner key at configured limit (30/15m on mounted route)
+    let hitBulk429 = false;
+    for (let i = 0; i < env.PARTNER_BULK_VERIFY_RATE_LIMIT_MAX + 3; i += 1) {
+      const res = await apiRequest(
+        server,
+        "POST",
+        "/api/partner/v1/certificates/verify-bulk",
+        { apiKey: bulkApiKey, body: { verificationCodes: [issuedCode] } }
+      );
+      if (res.status === 429) {
+        hitBulk429 = true;
+        assert.equal(res.body.success, false);
+        assert.ok(res.headers["ratelimit-limit"] || res.headers["x-ratelimit-limit"]);
+        break;
+      }
+    }
+    assert.equal(hitBulk429, true);
+
+    // Second separate partner key still succeeds because bulk limiter is scoped per partner key
+    const secondKeyRes = await apiRequest(server, "POST", "/api/partner-keys", {
+      token: stateToken,
+      body: { name: `Second Bulk Key ${testRunTag}` },
+    });
+    const secondKeyId = secondKeyRes.body.data.partnerKey.id;
+    const secondApiKey = secondKeyRes.body.data.apiKey;
+    createdKeyIds.push(secondKeyId);
+
+    const secondBulkRes = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      { apiKey: secondApiKey, body: { verificationCodes: [issuedCode] } }
+    );
+    assert.equal(secondBulkRes.status, 200);
+
+    // Revoking key immediately rejects subsequent bulk verification
+    await apiRequest(
+      server,
+      "POST",
+      `/api/partner-keys/${secondKeyId}/revoke`,
+      { token: stateToken }
+    );
+    const rejectedAfterRevoke = await apiRequest(
+      server,
+      "POST",
+      "/api/partner/v1/certificates/verify-bulk",
+      { apiKey: secondApiKey, body: { verificationCodes: [issuedCode] } }
+    );
+    assert.equal(rejectedAfterRevoke.status, 401);
   });
 });

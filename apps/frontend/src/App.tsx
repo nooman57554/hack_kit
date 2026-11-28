@@ -5,6 +5,8 @@ import { PublicOnlyRoute } from "./auth/PublicOnlyRoute";
 import { BatchDetailPage } from "./pages/BatchDetailPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
+import { PartnerKeysPage } from "./pages/PartnerKeysPage";
+import { PartnerVerifyDemoPage } from "./pages/PartnerVerifyDemoPage";
 import { RegisterPage } from "./pages/RegisterPage";
 import { VerifyCertificatePage } from "./pages/VerifyCertificatePage";
 
@@ -31,6 +33,22 @@ function App() {
             element={
               <ProtectedRoute>
                 <BatchDetailPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/partner-keys"
+            element={
+              <ProtectedRoute>
+                <PartnerKeysPage />
+              </ProtectedRoute>
+            }
+          />
+          <Route
+            path="/partner-verify-demo"
+            element={
+              <ProtectedRoute>
+                <PartnerVerifyDemoPage />
               </ProtectedRoute>
             }
           />

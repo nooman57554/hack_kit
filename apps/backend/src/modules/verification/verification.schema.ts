@@ -9,3 +9,22 @@ export const verificationCodeParamsSchema = z.object({
     .max(32)
     .regex(VERIFICATION_CODE_FORMAT),
 });
+
+export const bulkVerifyCertificatesSchema = z
+  .object({
+    verificationCodes: z
+      .array(
+        z
+          .string()
+          .trim()
+          .min(1, "Verification code cannot be empty")
+          .max(64, "Verification code must be at most 64 characters")
+      )
+      .min(1, "At least 1 verification code is required")
+      .max(100, "Maximum 100 verification codes allowed per request"),
+  })
+  .strict();
+
+export type BulkVerifyCertificatesInput = z.infer<
+  typeof bulkVerifyCertificatesSchema
+>;

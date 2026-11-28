@@ -12,7 +12,8 @@
         "prisma:generate": "prisma generate",
         "prisma:migrate": "prisma migrate dev",
         "prisma:seed": "prisma db seed",
-        "user:promote-admin": "tsx scripts/promote-admin.ts"
+        "user:promote-admin": "tsx scripts/promote-admin.ts",
+        "outbox:status": "tsx scripts/outbox-status.ts"
     },
     "prisma": {
         "seed": "tsx prisma/seed.ts"

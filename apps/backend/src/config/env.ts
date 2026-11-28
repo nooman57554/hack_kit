@@ -50,6 +50,17 @@ const envSchema = z.object({
     PARTNER_KEY_HASH_SECRET: z.string().min(32).optional(),
     PUBLIC_VERIFY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
     PARTNER_VERIFY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(120),
+    PARTNER_BULK_VERIFY_RATE_LIMIT_MAX: z.coerce.number().int().positive().default(30),
+    OUTBOX_WORKER_ENABLED: z
+      .enum(["true", "false"])
+      .optional()
+      .transform((value) => (value === undefined ? undefined : value === "true")),
+    OUTBOX_POLL_INTERVAL_MS: z.coerce.number().int().positive().default(2000),
+    OUTBOX_BATCH_SIZE: z.coerce.number().int().positive().max(100).default(10),
+    OUTBOX_LEASE_DURATION_MS: z.coerce.number().int().positive().default(30000),
+    OUTBOX_MAX_ATTEMPTS: z.coerce.number().int().positive().max(50).default(5),
+    OUTBOX_BACKOFF_BASE_MS: z.coerce.number().int().positive().default(1000),
+    OUTBOX_BACKOFF_MAX_MS: z.coerce.number().int().positive().default(60000),
     NODE_ENV: z.enum(["development", "production", "test"]).default("development"),
 });
 

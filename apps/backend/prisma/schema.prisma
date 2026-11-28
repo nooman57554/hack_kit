@@ -286,15 +286,26 @@ model AuditLog {
 }
 
 model OutboxEvent {
-  id          String    @id @default(uuid())
-  eventType   String
-  aggregateId String
-  payload     Json
-  createdAt   DateTime  @default(now())
-  publishedAt DateTime?
-  attempts    Int       @default(0)
+  id             String    @id @default(uuid())
+  eventType      String
+  aggregateId    String
+  payload        Json
+  status         String    @default("PENDING")
+  createdAt      DateTime  @default(now())
+  availableAt    DateTime  @default(now())
+  lockedAt       DateTime?
+  lockedBy       String?
+  leaseExpiresAt DateTime?
+  attempts       Int       @default(0)
+  lastError      String?
+  publishedAt    DateTime?
+  processedAt    DateTime?
+  deadLetteredAt DateTime?
+  updatedAt      DateTime  @default(now()) @updatedAt
 
   @@index([publishedAt, createdAt])
+  @@index([status, availableAt, createdAt])
+  @@index([status, leaseExpiresAt])
   @@index([aggregateId])
   @@map("outbox_events")
 }

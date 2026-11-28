@@ -26,6 +26,95 @@ export async function verifyCertificatePublic(
   return parseApiResponse<CertificateVerificationResult>(response);
 }
 
+export type BulkVerifyResultItem =
+  | (CertificateVerificationResult & { found: true })
+  | { verificationCode: string; found: false };
+
+export interface BulkVerifyResponseData {
+  results: BulkVerifyResultItem[];
+}
+
+export interface BulkVerifySummaryCounts {
+  submitted: number;
+  found: number;
+  issued: number;
+  revoked: number;
+  notFound: number;
+}
+
+export function parseBulkVerificationCodesInput(rawText: string): {
+  codes: string[];
+  error: string | null;
+} {
+  const codes = rawText
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0);
+
+  if (codes.length === 0) {
+    return {
+      codes: [],
+      error: "Enter at least 1 verification code (one per line).",
+    };
+  }
+
+  if (codes.length > 100) {
+    return {
+      codes: [],
+      error: `Maximum 100 verification codes allowed per request (entered ${codes.length}).`,
+    };
+  }
+
+  return { codes, error: null };
+}
+
+export function summarizeBulkVerificationResults(
+  results: BulkVerifyResultItem[]
+): BulkVerifySummaryCounts {
+  let found = 0;
+  let issued = 0;
+  let revoked = 0;
+  let notFound = 0;
+
+  for (const item of results) {
+    if (!item.found) {
+      notFound += 1;
+    } else {
+      found += 1;
+      if (item.status === "REVOKED" || !item.verified) {
+        revoked += 1;
+      } else {
+        issued += 1;
+      }
+    }
+  }
+
+  return {
+    submitted: results.length,
+    found,
+    issued,
+    revoked,
+    notFound,
+  };
+}
+
+export async function bulkVerifyCertificatesPartner(
+  apiKey: string,
+  verificationCodes: string[]
+): Promise<BulkVerifyResponseData> {
+  const response = await fetch("/api/partner/v1/certificates/verify-bulk", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-API-Key": apiKey,
+    },
+    body: JSON.stringify({ verificationCodes }),
+    cache: "no-store",
+  });
+
+  return parseApiResponse<BulkVerifyResponseData>(response);
+}
+
 export type VerificationViewState =
   | { kind: "idle" }
   | { kind: "loading"; verificationCode: string }

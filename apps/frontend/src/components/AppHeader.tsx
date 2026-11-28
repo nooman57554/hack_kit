@@ -10,6 +10,14 @@ export function AppHeader() {
     return null;
   }
 
+  const permissions = new Set(user.permissions);
+  const roles = new Set(user.roles);
+  const canAccessPartnerKeys =
+    permissions.has("partner_keys.read") ||
+    permissions.has("partner_keys.manage");
+  const canAccessDemo =
+    roles.has("STATE_OFFICE") || roles.has("ADMIN");
+
   const handleLogout = () => {
     logout();
     navigate("/login", { replace: true });
@@ -49,7 +57,25 @@ export function AppHeader() {
         </div>
       </div>
 
-      <div className="flex items-center gap-2.5">
+      <div className="flex flex-wrap items-center gap-2.5">
+        {canAccessPartnerKeys && (
+          <Link
+            to="/partner-keys"
+            className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-blue-300"
+          >
+            Partner API Keys
+          </Link>
+        )}
+
+        {canAccessDemo && (
+          <Link
+            to="/partner-verify-demo"
+            className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-blue-300"
+          >
+            Bulk Verify Demo
+          </Link>
+        )}
+
         <Link
           to="/verify"
           className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-blue-300"
