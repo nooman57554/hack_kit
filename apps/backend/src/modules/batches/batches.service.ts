@@ -4,18 +4,55 @@ import type { BatchReadScope } from "../../permissions/batch-scope.policy.js";
 import {
   AppError,
   BadRequestError,
+  ConflictError,
   ForbiddenError,
   NotFoundError,
   UnauthorizedError,
 } from "../../utils/errors.js";
 import {
   CsvValidationError,
+  ListBatchesQuery,
+  ReviewCandidateInput,
   parseAndValidateBatchCsv,
 } from "./batches.schema.js";
 import { evaluateCandidateQualification } from "./qualification.js";
 
 export const BATCH_STATUS = {
   DRAFT: "DRAFT",
+  SUBMITTED: "SUBMITTED",
+} as const;
+
+export const CANDIDATE_REVIEW_STATUS = {
+  PENDING: "PENDING",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+} as const;
+
+const batchCandidateSelect = {
+  id: true,
+  candidateId: true,
+  candidateRefSnapshot: true,
+  fullNameSnapshot: true,
+  phoneSnapshot: true,
+  attendancePercent: true,
+  marksPercent: true,
+  practicalPercent: true,
+  qualified: true,
+  qualificationReasons: true,
+  reviewStatus: true,
+  reviewedById: true,
+  reviewedAt: true,
+  reviewReason: true,
+  certificate: {
+    select: {
+      id: true,
+      verificationCode: true,
+      status: true,
+      issuedAt: true,
+      revokedAt: true,
+      revocationReason: true,
+    },
+  },
 } as const;
 
 const batchInclude = {
@@ -47,24 +84,37 @@ const batchInclude = {
   },
   candidates: {
     orderBy: {
-      candidateRefSnapshot: "asc",
+      candidateRefSnapshot: "asc" as const,
     },
-    select: {
-      id: true,
-      candidateId: true,
-      candidateRefSnapshot: true,
-      fullNameSnapshot: true,
-      phoneSnapshot: true,
-      attendancePercent: true,
-      marksPercent: true,
-      practicalPercent: true,
-      qualified: true,
-      qualificationReasons: true,
-    },
+    select: batchCandidateSelect,
   },
 } as const;
 
+type BatchCandidateRow = Prisma.BatchCandidateGetPayload<{
+  select: typeof batchCandidateSelect;
+}>;
+
 type BatchWithDetails = Prisma.BatchGetPayload<{ include: typeof batchInclude }>;
+
+function formatBatchCandidate(entry: BatchCandidateRow) {
+  return {
+    id: entry.id,
+    candidateId: entry.candidateId,
+    candidateRef: entry.candidateRefSnapshot,
+    fullName: entry.fullNameSnapshot,
+    phone: entry.phoneSnapshot,
+    attendancePercent: entry.attendancePercent,
+    marksPercent: entry.marksPercent,
+    practicalPercent: entry.practicalPercent,
+    qualified: entry.qualified,
+    qualificationReasons: entry.qualificationReasons,
+    reviewStatus: entry.reviewStatus,
+    reviewedById: entry.reviewedById,
+    reviewedAt: entry.reviewedAt,
+    reviewReason: entry.reviewReason,
+    certificate: entry.certificate,
+  };
+}
 
 export function formatBatchResponse(batch: BatchWithDetails) {
   return {
@@ -79,22 +129,78 @@ export function formatBatchResponse(batch: BatchWithDetails) {
     trainingCenter: batch.trainingCenter,
     course: batch.course,
     ruleVersion: batch.ruleVersion,
-    candidates: batch.candidates.map((entry) => ({
-      id: entry.id,
-      candidateId: entry.candidateId,
-      candidateRef: entry.candidateRefSnapshot,
-      fullName: entry.fullNameSnapshot,
-      phone: entry.phoneSnapshot,
-      attendancePercent: entry.attendancePercent,
-      marksPercent: entry.marksPercent,
-      practicalPercent: entry.practicalPercent,
-      qualified: entry.qualified,
-      qualificationReasons: entry.qualificationReasons,
-    })),
+    candidates: batch.candidates.map(formatBatchCandidate),
   };
 }
 
 export class BatchesService {
+  async listBatches(scope: BatchReadScope, query: ListBatchesQuery) {
+    const where: Prisma.BatchWhereInput = scope.crossCenter
+      ? {}
+      : { trainingCenterId: scope.trainingCenterId };
+
+    const skip = (query.page - 1) * query.limit;
+
+    const [items, total] = await Promise.all([
+      prisma.batch.findMany({
+        where,
+        orderBy: { createdAt: "desc" },
+        skip,
+        take: query.limit,
+        select: {
+          id: true,
+          trainingCenterId: true,
+          courseId: true,
+          ruleVersionId: true,
+          status: true,
+          createdById: true,
+          createdAt: true,
+          submittedAt: true,
+          trainingCenter: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+              districtId: true,
+            },
+          },
+          course: {
+            select: {
+              id: true,
+              code: true,
+              name: true,
+            },
+          },
+          ruleVersion: {
+            select: {
+              id: true,
+              version: true,
+            },
+          },
+          _count: {
+            select: {
+              candidates: true,
+            },
+          },
+        },
+      }),
+      prisma.batch.count({ where }),
+    ]);
+
+    return {
+      batches: items.map(({ _count, ...batch }) => ({
+        ...batch,
+        candidateCount: _count.candidates,
+      })),
+      pagination: {
+        page: query.page,
+        limit: query.limit,
+        total,
+        totalPages: total === 0 ? 0 : Math.ceil(total / query.limit),
+      },
+    };
+  }
+
   async importBatch(
     actorId: string,
     trainingCenterId: string,
@@ -286,6 +392,251 @@ export class BatchesService {
       });
 
       return formatBatchResponse(createdBatch);
+    });
+  }
+
+  async submitBatch(
+    actorId: string,
+    trainingCenterId: string,
+    batchId: string
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const actor = await tx.user.findUnique({
+        where: { id: actorId },
+        select: {
+          id: true,
+          districtId: true,
+          trainingCenterId: true,
+        },
+      });
+
+      if (!actor) {
+        throw new UnauthorizedError("Authenticated user no longer exists");
+      }
+
+      if (
+        actor.districtId !== null ||
+        actor.trainingCenterId === null ||
+        actor.trainingCenterId !== trainingCenterId
+      ) {
+        throw new ForbiddenError(
+          "Only Training Centre users with an assigned centre scope can submit batches"
+        );
+      }
+
+      const existing = await tx.batch.findUnique({
+        where: { id: batchId },
+        include: batchInclude,
+      });
+
+      if (!existing) {
+        throw new NotFoundError("Batch not found");
+      }
+
+      if (existing.trainingCenterId !== trainingCenterId) {
+        throw new ForbiddenError(
+          "You can only submit batches belonging to your training centre"
+        );
+      }
+
+      if (existing.status === BATCH_STATUS.SUBMITTED) {
+        return formatBatchResponse(existing);
+      }
+
+      if (existing.status !== BATCH_STATUS.DRAFT) {
+        throw new ConflictError(
+          `Batch cannot be submitted from status '${existing.status}'`
+        );
+      }
+
+      const submittedAt = new Date();
+      const updated = await tx.batch.updateMany({
+        where: {
+          id: batchId,
+          trainingCenterId,
+          status: BATCH_STATUS.DRAFT,
+        },
+        data: {
+          status: BATCH_STATUS.SUBMITTED,
+          submittedAt,
+        },
+      });
+
+      if (updated.count === 0) {
+        const current = await tx.batch.findUniqueOrThrow({
+          where: { id: batchId },
+          include: batchInclude,
+        });
+        if (current.status === BATCH_STATUS.SUBMITTED) {
+          return formatBatchResponse(current);
+        }
+        throw new ConflictError("Batch submission conflicted with a concurrent update");
+      }
+
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: "BATCH_SUBMITTED",
+          entityType: "BATCH",
+          entityId: batchId,
+          details: {
+            trainingCenterId,
+            courseId: existing.courseId,
+            submittedAt: submittedAt.toISOString(),
+          },
+        },
+      });
+
+      await tx.outboxEvent.create({
+        data: {
+          eventType: "BATCH_SUBMITTED",
+          aggregateId: batchId,
+          payload: {
+            batchId,
+            trainingCenterId,
+            courseId: existing.courseId,
+            status: BATCH_STATUS.SUBMITTED,
+            submittedById: actorId,
+            submittedAt: submittedAt.toISOString(),
+          },
+        },
+      });
+
+      const submittedBatch = await tx.batch.findUniqueOrThrow({
+        where: { id: batchId },
+        include: batchInclude,
+      });
+
+      return formatBatchResponse(submittedBatch);
+    });
+  }
+
+  async reviewBatchCandidate(
+    actorId: string,
+    batchId: string,
+    batchCandidateId: string,
+    input: ReviewCandidateInput
+  ) {
+    return prisma.$transaction(async (tx) => {
+      const entry = await tx.batchCandidate.findUnique({
+        where: { id: batchCandidateId },
+        include: {
+          batch: true,
+          certificate: {
+            select: batchCandidateSelect.certificate.select,
+          },
+        },
+      });
+
+      if (!entry || entry.batchId !== batchId) {
+        throw new NotFoundError(
+          "Batch candidate not found in the specified batch"
+        );
+      }
+
+      if (entry.batch.status !== BATCH_STATUS.SUBMITTED) {
+        throw new ConflictError(
+          "Candidates can only be reviewed after the batch is submitted"
+        );
+      }
+
+      if (
+        input.status === CANDIDATE_REVIEW_STATUS.APPROVED &&
+        !entry.qualified
+      ) {
+        throw new ConflictError("Unqualified candidates cannot be approved");
+      }
+
+      if (entry.reviewStatus !== CANDIDATE_REVIEW_STATUS.PENDING) {
+        const isSameDecision =
+          entry.reviewStatus === input.status &&
+          (input.status === CANDIDATE_REVIEW_STATUS.APPROVED ||
+            entry.reviewReason === input.reason);
+
+        if (isSameDecision) {
+          return formatBatchCandidate(entry);
+        }
+
+        throw new ConflictError(
+          `Candidate review is already finalized as '${entry.reviewStatus}'`
+        );
+      }
+
+      const reviewedAt = new Date();
+      const reviewReason =
+        input.status === CANDIDATE_REVIEW_STATUS.REJECTED ? input.reason! : null;
+
+      const updated = await tx.batchCandidate.updateMany({
+        where: {
+          id: batchCandidateId,
+          batchId,
+          reviewStatus: CANDIDATE_REVIEW_STATUS.PENDING,
+        },
+        data: {
+          reviewStatus: input.status,
+          reviewedById: actorId,
+          reviewedAt,
+          reviewReason,
+        },
+      });
+
+      if (updated.count === 0) {
+        const current = await tx.batchCandidate.findUniqueOrThrow({
+          where: { id: batchCandidateId },
+          select: batchCandidateSelect,
+        });
+
+        const isSameDecision =
+          current.reviewStatus === input.status &&
+          (input.status === CANDIDATE_REVIEW_STATUS.APPROVED ||
+            current.reviewReason === input.reason);
+
+        if (isSameDecision) {
+          return formatBatchCandidate(current);
+        }
+
+        throw new ConflictError(
+          "Candidate review decision conflicted with a concurrent update"
+        );
+      }
+
+      const updatedEntry = await tx.batchCandidate.findUniqueOrThrow({
+        where: { id: batchCandidateId },
+        select: batchCandidateSelect,
+      });
+
+      await tx.auditLog.create({
+        data: {
+          actorId,
+          action: "CANDIDATE_REVIEWED",
+          entityType: "BATCH_CANDIDATE",
+          entityId: batchCandidateId,
+          details: {
+            batchId,
+            candidateId: entry.candidateId,
+            reviewStatus: input.status,
+            reason: reviewReason,
+          },
+        },
+      });
+
+      await tx.outboxEvent.create({
+        data: {
+          eventType: "CANDIDATE_REVIEWED",
+          aggregateId: batchCandidateId,
+          payload: {
+            batchId,
+            batchCandidateId,
+            candidateId: entry.candidateId,
+            reviewStatus: input.status,
+            reviewReason,
+            reviewedById: actorId,
+            reviewedAt: reviewedAt.toISOString(),
+          },
+        },
+      });
+
+      return formatBatchCandidate(updatedEntry);
     });
   }
 

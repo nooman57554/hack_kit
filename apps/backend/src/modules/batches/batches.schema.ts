@@ -18,6 +18,51 @@ export const batchIdParamsSchema = z.object({
   batchId: z.string().uuid("batchId must be a valid UUID"),
 });
 
+export const batchCandidateParamsSchema = z.object({
+  batchId: z.string().uuid("batchId must be a valid UUID"),
+  batchCandidateId: z.string().uuid("batchCandidateId must be a valid UUID"),
+});
+
+export const listBatchesQuerySchema = z.object({
+  page: z.coerce.number().int().min(1, "page must be at least 1").default(1),
+  limit: z.coerce
+    .number()
+    .int()
+    .min(1, "limit must be at least 1")
+    .max(100, "limit must be at most 100")
+    .default(20),
+});
+
+export const reviewCandidateSchema = z
+  .object({
+    status: z.enum(["APPROVED", "REJECTED"]),
+    reason: z
+      .string()
+      .trim()
+      .min(1, "Rejection reason is required")
+      .max(500, "Rejection reason must be at most 500 characters")
+      .optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.status === "REJECTED" && !data.reason) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "Rejection reason is required when status is REJECTED",
+      });
+    }
+    if (data.status === "APPROVED" && data.reason !== undefined) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["reason"],
+        message: "reason must be omitted when status is APPROVED",
+      });
+    }
+  });
+
+export type ReviewCandidateInput = z.infer<typeof reviewCandidateSchema>;
+export type ListBatchesQuery = z.infer<typeof listBatchesQuerySchema>;
+
 export interface CsvValidationError {
   row: number;
   field: string;

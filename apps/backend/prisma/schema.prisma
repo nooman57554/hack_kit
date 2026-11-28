@@ -48,9 +48,12 @@ model User {
   updatedAt           DateTime            @updatedAt
   userRoles           UserRole[]
   tasks               Task[]
-  createdRuleVersions CourseRuleVersion[]
-  createdBatches      Batch[]
-  auditLogs           AuditLog[]
+  createdRuleVersions     CourseRuleVersion[]
+  createdBatches          Batch[]
+  reviewedBatchCandidates BatchCandidate[]    @relation("ReviewedBatchCandidates")
+  issuedCertificates      Certificate[]       @relation("IssuedCertificates")
+  revokedCertificates     Certificate[]       @relation("RevokedCertificates")
+  auditLogs               AuditLog[]
 
   @@index([districtId])
   @@index([trainingCenterId])
@@ -192,7 +195,7 @@ model Batch {
 }
 
 model BatchCandidate {
-  id                   String    @id @default(uuid())
+  id                   String       @id @default(uuid())
   batchId              String
   candidateId          String
   candidateRefSnapshot String
@@ -203,12 +206,43 @@ model BatchCandidate {
   practicalPercent     Float?
   qualified            Boolean
   qualificationReasons Json
-  batch                Batch     @relation(fields: [batchId], references: [id], onDelete: Restrict)
-  candidate            Candidate @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  reviewStatus         String       @default("PENDING")
+  reviewedById         String?
+  reviewedAt           DateTime?
+  reviewReason         String?
+  batch                Batch        @relation(fields: [batchId], references: [id], onDelete: Restrict)
+  candidate            Candidate    @relation(fields: [candidateId], references: [id], onDelete: Restrict)
+  reviewedBy           User?        @relation("ReviewedBatchCandidates", fields: [reviewedById], references: [id], onDelete: Restrict)
+  certificate          Certificate?
 
   @@unique([batchId, candidateId])
   @@index([candidateId])
+  @@index([reviewedById])
+  @@index([batchId, reviewStatus])
   @@map("batch_candidates")
+}
+
+model Certificate {
+  id               String         @id @default(uuid())
+  batchCandidateId String         @unique
+  verificationCode String         @unique
+  status           String         @default("ISSUED")
+  issuedById       String
+  issuedAt         DateTime       @default(now())
+  pdfBytes         Bytes
+  revokedById      String?
+  revokedAt        DateTime?
+  revocationReason String?
+  createdAt        DateTime       @default(now())
+  updatedAt        DateTime       @updatedAt
+  batchCandidate   BatchCandidate @relation(fields: [batchCandidateId], references: [id], onDelete: Restrict)
+  issuedBy         User           @relation("IssuedCertificates", fields: [issuedById], references: [id], onDelete: Restrict)
+  revokedBy        User?          @relation("RevokedCertificates", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@index([issuedById])
+  @@index([revokedById])
+  @@index([status])
+  @@map("certificates")
 }
 
 model AuditLog {

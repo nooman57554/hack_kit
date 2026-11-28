@@ -32,8 +32,15 @@ export function RegisterPage() {
       navigate("/", { replace: true });
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.details) {
-        for (const [field, messages] of Object.entries(err.details)) {
+      if (
+        err instanceof ApiError &&
+        err.details &&
+        typeof err.details === "object" &&
+        !Array.isArray(err.details)
+      ) {
+        for (const [field, messages] of Object.entries(
+          err.details as Record<string, string[] | undefined>
+        )) {
           if (
             messages?.[0] &&
             (field === "name" || field === "email" || field === "password")

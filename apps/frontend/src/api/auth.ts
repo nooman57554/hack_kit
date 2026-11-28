@@ -27,19 +27,15 @@ interface ApiErrorResponse {
   success: false;
   error?: {
     message?: string;
-    details?: Record<string, string[] | undefined>;
+    details?: unknown;
   };
 }
 
 export class ApiError extends Error {
   readonly status: number;
-  readonly details?: Record<string, string[] | undefined>;
+  readonly details?: unknown;
 
-  constructor(
-    message: string,
-    status: number,
-    details?: Record<string, string[] | undefined>
-  ) {
+  constructor(message: string, status: number, details?: unknown) {
     super(message);
     this.name = "ApiError";
     this.status = status;
@@ -47,7 +43,7 @@ export class ApiError extends Error {
   }
 }
 
-async function parseApiResponse<T>(response: Response): Promise<T> {
+export async function parseApiResponse<T>(response: Response): Promise<T> {
   let payload: ApiSuccessResponse<T> | ApiErrorResponse;
 
   try {

@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { batchResponseSchema } from "../src/modules/batches/batches.contracts.js";
+import {
+  batchResponseSchema,
+  listBatchesResponseSchema,
+  reviewCandidateResponseSchema,
+} from "../src/modules/batches/batches.contracts.js";
 import { formatBatchResponse } from "../src/modules/batches/batches.service.js";
+import { certificateResponseSchema } from "../src/modules/certificates/certificates.contracts.js";
 import {
   createCourseResponseSchema,
   getCourseRulesResponseSchema,
@@ -11,14 +16,20 @@ import {
 import {
   resolveBatchImportCenterId,
   resolveBatchReadScope,
+  resolveBatchSubmitCenterId,
+  resolveCrossCenterActionScope,
 } from "../src/permissions/batch-scope.policy.js";
 import { DEFAULT_ROLES, PERMISSIONS } from "../src/permissions/permission.registry.js";
 import { ForbiddenError } from "../src/utils/errors.js";
 
-describe("Batch scope authorization policy", () => {
+describe("Batch and certificate scope authorization policy", () => {
+  const userId = "11111111-1111-4111-8111-111111111111";
+  const centerId = "22222222-2222-4222-8222-222222222222";
+  const districtId = "33333333-3333-4333-8333-333333333333";
+
   it("grants cross-centre read access to unscoped multi-role users with State Office or Admin access", () => {
     const scope = resolveBatchReadScope({
-      id: "11111111-1111-4111-8111-111111111111",
+      id: userId,
       roles: [DEFAULT_ROLES.MEMBER, DEFAULT_ROLES.STATE_OFFICE],
       districtId: null,
       trainingCenterId: null,
@@ -33,9 +44,8 @@ describe("Batch scope authorization policy", () => {
   });
 
   it("restricts centre-scoped users to their own training centre even with multiple roles", () => {
-    const centerId = "22222222-2222-4222-8222-222222222222";
     const scope = resolveBatchReadScope({
-      id: "11111111-1111-4111-8111-111111111111",
+      id: userId,
       roles: [DEFAULT_ROLES.TRAINING_CENTER, DEFAULT_ROLES.STATE_OFFICE],
       districtId: null,
       trainingCenterId: centerId,
@@ -52,7 +62,7 @@ describe("Batch scope authorization policy", () => {
     assert.throws(
       () =>
         resolveBatchReadScope({
-          id: "11111111-1111-4111-8111-111111111111",
+          id: userId,
           roles: [DEFAULT_ROLES.STATE_OFFICE],
           districtId: null,
           trainingCenterId: null,
@@ -64,10 +74,10 @@ describe("Batch scope authorization policy", () => {
     assert.throws(
       () =>
         resolveBatchReadScope({
-          id: "11111111-1111-4111-8111-111111111111",
+          id: userId,
           roles: [DEFAULT_ROLES.STATE_OFFICE],
-          districtId: "33333333-3333-4333-8333-333333333333",
-          trainingCenterId: "22222222-2222-4222-8222-222222222222",
+          districtId,
+          trainingCenterId: centerId,
           permissions: new Set([PERMISSIONS.BATCHES_READ.key]),
         }),
       ForbiddenError
@@ -75,10 +85,9 @@ describe("Batch scope authorization policy", () => {
   });
 
   it("requires batches.import and centre scope for batch import", () => {
-    const centerId = "22222222-2222-4222-8222-222222222222";
     assert.equal(
       resolveBatchImportCenterId({
-        id: "11111111-1111-4111-8111-111111111111",
+        id: userId,
         roles: [DEFAULT_ROLES.TRAINING_CENTER, DEFAULT_ROLES.MEMBER],
         districtId: null,
         trainingCenterId: centerId,
@@ -90,12 +99,83 @@ describe("Batch scope authorization policy", () => {
     assert.throws(
       () =>
         resolveBatchImportCenterId({
-          id: "11111111-1111-4111-8111-111111111111",
+          id: userId,
           roles: [DEFAULT_ROLES.STATE_OFFICE],
           districtId: null,
           trainingCenterId: null,
           permissions: new Set([PERMISSIONS.BATCHES_IMPORT.key]),
         }),
+      ForbiddenError
+    );
+  });
+
+  it("requires batches.submit and centre scope for batch submission", () => {
+    assert.equal(
+      resolveBatchSubmitCenterId({
+        id: userId,
+        roles: [DEFAULT_ROLES.TRAINING_CENTER],
+        districtId: null,
+        trainingCenterId: centerId,
+        permissions: new Set([PERMISSIONS.BATCHES_SUBMIT.key]),
+      }),
+      centerId
+    );
+
+    assert.throws(
+      () =>
+        resolveBatchSubmitCenterId({
+          id: userId,
+          roles: [DEFAULT_ROLES.STATE_OFFICE],
+          districtId: null,
+          trainingCenterId: null,
+          permissions: new Set([PERMISSIONS.BATCHES_SUBMIT.key]),
+        }),
+      ForbiddenError
+    );
+  });
+
+  it("requires unscoped cross-centre authority for review, issue, and revoke", () => {
+    assert.deepEqual(
+      resolveCrossCenterActionScope(
+        {
+          id: userId,
+          roles: [DEFAULT_ROLES.STATE_OFFICE, DEFAULT_ROLES.MEMBER],
+          districtId: null,
+          trainingCenterId: null,
+          permissions: new Set([PERMISSIONS.CANDIDATES_REVIEW.key]),
+        },
+        PERMISSIONS.CANDIDATES_REVIEW.key
+      ),
+      { crossCenter: true }
+    );
+
+    assert.throws(
+      () =>
+        resolveCrossCenterActionScope(
+          {
+            id: userId,
+            roles: [DEFAULT_ROLES.TRAINING_CENTER, DEFAULT_ROLES.STATE_OFFICE],
+            districtId: null,
+            trainingCenterId: centerId,
+            permissions: new Set([PERMISSIONS.CERTIFICATES_ISSUE.key]),
+          },
+          PERMISSIONS.CERTIFICATES_ISSUE.key
+        ),
+      ForbiddenError
+    );
+
+    assert.throws(
+      () =>
+        resolveCrossCenterActionScope(
+          {
+            id: userId,
+            roles: [DEFAULT_ROLES.DISTRICT_OFFICER],
+            districtId,
+            trainingCenterId: null,
+            permissions: new Set([PERMISSIONS.CERTIFICATES_REVOKE.key]),
+          },
+          PERMISSIONS.CERTIFICATES_REVOKE.key
+        ),
       ForbiddenError
     );
   });
@@ -109,16 +189,16 @@ describe("Batch candidate snapshots and endpoint response contracts", () => {
   const uuid3 = "33333333-3333-4333-8333-333333333333";
   const uuid4 = "44444444-4444-4444-8444-444444444444";
 
-  it("maps batch responses from BatchCandidate snapshot fields", () => {
+  it("maps batch responses from BatchCandidate snapshot fields with review and certificate metadata", () => {
     const formatted = formatBatchResponse({
       id: uuid1,
       trainingCenterId: uuid2,
       courseId: uuid3,
       ruleVersionId: uuid4,
-      status: "DRAFT",
+      status: "SUBMITTED",
       createdById: uuid1,
       createdAt: now,
-      submittedAt: null,
+      submittedAt: now,
       trainingCenter: {
         id: uuid2,
         code: "TC-NORTH-01",
@@ -151,6 +231,18 @@ describe("Batch candidate snapshots and endpoint response contracts", () => {
           practicalPercent: 75,
           qualified: true,
           qualificationReasons: [],
+          reviewStatus: "APPROVED",
+          reviewedById: uuid3,
+          reviewedAt: now,
+          reviewReason: null,
+          certificate: {
+            id: uuid4,
+            verificationCode: "SP-ABCD1234-EF567890",
+            status: "ISSUED",
+            issuedAt: now,
+            revokedAt: null,
+            revocationReason: null,
+          },
         },
       ],
     });
@@ -164,9 +256,22 @@ describe("Batch candidate snapshots and endpoint response contracts", () => {
     );
     const parsed = batchResponseSchema.parse(serialized);
     assert.equal(parsed.data.batch.candidates[0].fullName, "Original Name");
+    assert.equal(parsed.data.batch.candidates[0].reviewStatus, "APPROVED");
+    assert.equal(parsed.data.batch.candidates[0].certificate?.status, "ISSUED");
+
+    assert.ok(
+      reviewCandidateResponseSchema.parse(
+        JSON.parse(
+          JSON.stringify({
+            success: true,
+            data: { candidate: formatted.candidates[0] },
+          })
+        )
+      )
+    );
   });
 
-  it("validates course and rule response contracts", () => {
+  it("validates batch list, certificate, and course/rule response contracts", () => {
     const rule = {
       id: uuid4,
       courseId: uuid3,
@@ -217,6 +322,69 @@ describe("Batch candidate snapshots and endpoint response contracts", () => {
             currentRuleVersionId: uuid4,
           },
           rules: [rule],
+        },
+      })
+    );
+
+    assert.ok(
+      listBatchesResponseSchema.parse({
+        success: true,
+        data: {
+          batches: [
+            {
+              id: uuid1,
+              trainingCenterId: uuid2,
+              courseId: uuid3,
+              ruleVersionId: uuid4,
+              status: "DRAFT",
+              createdById: uuid1,
+              createdAt: nowIso,
+              submittedAt: null,
+              trainingCenter: {
+                id: uuid2,
+                code: "TC-NORTH-01",
+                name: "North Skill Academy",
+                districtId: uuid3,
+              },
+              course: {
+                id: uuid3,
+                code: "FSWD-101",
+                name: "Full-Stack Web Development",
+              },
+              ruleVersion: {
+                id: uuid4,
+                version: 1,
+              },
+              candidateCount: 3,
+            },
+          ],
+          pagination: {
+            page: 1,
+            limit: 20,
+            total: 1,
+            totalPages: 1,
+          },
+        },
+      })
+    );
+
+    assert.ok(
+      certificateResponseSchema.parse({
+        success: true,
+        data: {
+          certificate: {
+            id: uuid4,
+            batchCandidateId: uuid1,
+            verificationCode: "SP-ABCD1234-EF567890",
+            status: "ISSUED",
+            issuedById: uuid2,
+            issuedAt: nowIso,
+            revokedById: null,
+            revokedAt: null,
+            revocationReason: null,
+            createdAt: nowIso,
+            updatedAt: nowIso,
+          },
         },
       })
     );

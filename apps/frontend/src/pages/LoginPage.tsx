@@ -36,8 +36,15 @@ export function LoginPage() {
       navigate("/", { replace: true });
     },
     onError: (err) => {
-      if (err instanceof ApiError && err.details) {
-        for (const [field, messages] of Object.entries(err.details)) {
+      if (
+        err instanceof ApiError &&
+        err.details &&
+        typeof err.details === "object" &&
+        !Array.isArray(err.details)
+      ) {
+        for (const [field, messages] of Object.entries(
+          err.details as Record<string, string[] | undefined>
+        )) {
           if (messages?.[0] && (field === "email" || field === "password")) {
             setError(field, { message: messages[0] });
           }

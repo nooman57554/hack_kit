@@ -55,6 +55,22 @@ export const PERMISSIONS = {
     key: "batches.read",
     description: "Read batches and candidate qualification results",
   },
+  BATCHES_SUBMIT: {
+    key: "batches.submit",
+    description: "Submit draft batches for review",
+  },
+  CANDIDATES_REVIEW: {
+    key: "candidates.review",
+    description: "Approve or reject qualified batch candidates",
+  },
+  CERTIFICATES_ISSUE: {
+    key: "certificates.issue",
+    description: "Issue certificates for approved candidates",
+  },
+  CERTIFICATES_REVOKE: {
+    key: "certificates.revoke",
+    description: "Revoke issued certificates",
+  },
 } as const;
 
 export type PermissionDefinition = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];
@@ -92,11 +108,15 @@ export const ROLE_PERMISSIONS_MATRIX: Record<DefaultRole, readonly PermissionKey
     PERMISSIONS.COURSES_READ.key,
     PERMISSIONS.COURSES_MANAGE.key,
     PERMISSIONS.BATCHES_READ.key,
+    PERMISSIONS.CANDIDATES_REVIEW.key,
+    PERMISSIONS.CERTIFICATES_ISSUE.key,
+    PERMISSIONS.CERTIFICATES_REVOKE.key,
   ],
   [DEFAULT_ROLES.TRAINING_CENTER]: [
     PERMISSIONS.COURSES_READ.key,
     PERMISSIONS.BATCHES_IMPORT.key,
     PERMISSIONS.BATCHES_READ.key,
+    PERMISSIONS.BATCHES_SUBMIT.key,
   ],
   [DEFAULT_ROLES.DISTRICT_OFFICER]: [],
 };
