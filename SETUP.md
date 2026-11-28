@@ -79,7 +79,7 @@ docker compose down -v
 
 ## 5. Seeded Demo Accounts (Local/Demo Only)
 
-> **Warning:** These accounts and their shared password are **for local development and demo testing only**. Do not expose or reuse them in any deployed or production environment.
+> **Warning:** These accounts and their shared password are **for local development and demo testing only**, you can use them for testing the application after you have cloned the repo and ran docker compose commad which starts the services and seeds these test accounts by default. Do not expose or reuse them in any deployed or production environment.
 
 All seeded demo accounts share the default demo password:
 
