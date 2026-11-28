@@ -1,0 +1,1382 @@
+openapi: 3.0.3
+info:
+  title: SkillPass API
+  version: 1.0.0
+  description: |
+    SkillPass backend API for authentication, RBAC, course qualifying rules,
+    atomic candidate CSV batch import, review, certificate issuance/PDF/revocation,
+    public & partner certificate verification, partner API key management, and
+    transactional outbox status reporting.
+
+    Note: WhatsApp/SMS notifications and external partner webhooks are deferred and
+    not implemented in the current release.
+servers:
+  - url: http://localhost:5000
+    description: Local Backend API
+  - url: http://localhost:5173
+    description: Local Frontend Proxy (Nginx / Vite)
+tags:
+  - name: Health
+  - name: Auth
+  - name: Courses
+  - name: Batches
+  - name: Certificates
+  - name: Verification
+  - name: PartnerKeys
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: JWT issued by POST /api/auth/login or POST /api/auth/register
+    PartnerApiKey:
+      type: apiKey
+      in: header
+      name: X-API-Key
+      description: Partner API key formatted as `<prefix>.<secret>` (scope `certificates:verify`)
+  schemas:
+    ErrorEnvelope:
+      type: object
+      required: [success, error]
+      properties:
+        success:
+          type: boolean
+          enum: [false]
+        error:
+          type: object
+          required: [message]
+          properties:
+            message:
+              type: string
+            details:
+              description: Field validation map or structured error list when applicable
+    AuthUser:
+      type: object
+      required: [id, name, email, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CurrentUser:
+      allOf:
+        - $ref: "#/components/schemas/AuthUser"
+        - type: object
+          required: [roles, permissions]
+          properties:
+            roles:
+              type: array
+              items:
+                type: string
+            permissions:
+              type: array
+              items:
+                type: string
+    CourseRuleVersion:
+      type: object
+      required:
+        - id
+        - courseId
+        - version
+        - minAttendancePercent
+        - minMarksPercent
+        - practicalRequired
+        - minPracticalPercent
+        - createdById
+        - createdAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        version:
+          type: integer
+          minimum: 1
+        minAttendancePercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        minMarksPercent:
+          type: number
+          minimum: 0
+          maximum: 100
+        practicalRequired:
+          type: boolean
+        minPracticalPercent:
+          type: number
+          nullable: true
+          minimum: 0
+          maximum: 100
+        createdById:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+    CourseSummary:
+      type: object
+      required: [id, code, name, currentRuleVersionId, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        code:
+          type: string
+        name:
+          type: string
+        currentRuleVersionId:
+          type: string
+          format: uuid
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    CourseWithRule:
+      allOf:
+        - $ref: "#/components/schemas/CourseSummary"
+        - type: object
+          required: [currentRuleVersion]
+          properties:
+            currentRuleVersion:
+              nullable: true
+              allOf:
+                - $ref: "#/components/schemas/CourseRuleVersion"
+    CertificateMetadata:
+      type: object
+      required:
+        - id
+        - batchCandidateId
+        - verificationCode
+        - status
+        - issuedById
+        - issuedAt
+        - revokedById
+        - revokedAt
+        - revocationReason
+        - createdAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        batchCandidateId:
+          type: string
+          format: uuid
+        verificationCode:
+          type: string
+          example: SP-ABCD1234-EF567890
+        status:
+          type: string
+          enum: [ISSUED, REVOKED]
+        issuedById:
+          type: string
+          format: uuid
+        issuedAt:
+          type: string
+          format: date-time
+        revokedById:
+          type: string
+          format: uuid
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        revocationReason:
+          type: string
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+    BatchCandidate:
+      type: object
+      required:
+        - id
+        - candidateId
+        - candidateRef
+        - fullName
+        - phone
+        - attendancePercent
+        - marksPercent
+        - practicalPercent
+        - qualified
+        - qualificationReasons
+        - reviewStatus
+        - reviewedById
+        - reviewedAt
+        - reviewReason
+        - certificate
+      properties:
+        id:
+          type: string
+          format: uuid
+        candidateId:
+          type: string
+          format: uuid
+        candidateRef:
+          type: string
+        fullName:
+          type: string
+        phone:
+          type: string
+        attendancePercent:
+          type: number
+        marksPercent:
+          type: number
+        practicalPercent:
+          type: number
+          nullable: true
+        qualified:
+          type: boolean
+        qualificationReasons:
+          type: array
+          items:
+            type: object
+            required: [code, message]
+            properties:
+              code:
+                type: string
+                enum:
+                  - ATTENDANCE_BELOW_MINIMUM
+                  - MARKS_BELOW_MINIMUM
+                  - PRACTICAL_MISSING
+                  - PRACTICAL_BELOW_MINIMUM
+              message:
+                type: string
+        reviewStatus:
+          type: string
+          enum: [PENDING, APPROVED, REJECTED]
+        reviewedById:
+          type: string
+          format: uuid
+          nullable: true
+        reviewedAt:
+          type: string
+          format: date-time
+          nullable: true
+        reviewReason:
+          type: string
+          nullable: true
+        certificate:
+          nullable: true
+          type: object
+          required:
+            - id
+            - verificationCode
+            - status
+            - issuedAt
+            - revokedAt
+            - revocationReason
+          properties:
+            id:
+              type: string
+              format: uuid
+            verificationCode:
+              type: string
+            status:
+              type: string
+              enum: [ISSUED, REVOKED]
+            issuedAt:
+              type: string
+              format: date-time
+            revokedAt:
+              type: string
+              format: date-time
+              nullable: true
+            revocationReason:
+              type: string
+              nullable: true
+    BatchDetail:
+      type: object
+      required:
+        - id
+        - trainingCenterId
+        - courseId
+        - ruleVersionId
+        - status
+        - createdById
+        - createdAt
+        - submittedAt
+        - trainingCenter
+        - course
+        - ruleVersion
+        - candidates
+      properties:
+        id:
+          type: string
+          format: uuid
+        trainingCenterId:
+          type: string
+          format: uuid
+        courseId:
+          type: string
+          format: uuid
+        ruleVersionId:
+          type: string
+          format: uuid
+        status:
+          type: string
+          enum: [DRAFT, SUBMITTED]
+        createdById:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        submittedAt:
+          type: string
+          format: date-time
+          nullable: true
+        trainingCenter:
+          type: object
+          required: [id, code, name, districtId]
+          properties:
+            id:
+              type: string
+              format: uuid
+            code:
+              type: string
+            name:
+              type: string
+            districtId:
+              type: string
+              format: uuid
+        course:
+          type: object
+          required: [id, code, name]
+          properties:
+            id:
+              type: string
+              format: uuid
+            code:
+              type: string
+            name:
+              type: string
+        ruleVersion:
+          type: object
+          required:
+            - id
+            - version
+            - minAttendancePercent
+            - minMarksPercent
+            - practicalRequired
+            - minPracticalPercent
+            - createdAt
+          properties:
+            id:
+              type: string
+              format: uuid
+            version:
+              type: integer
+            minAttendancePercent:
+              type: number
+            minMarksPercent:
+              type: number
+            practicalRequired:
+              type: boolean
+            minPracticalPercent:
+              type: number
+              nullable: true
+            createdAt:
+              type: string
+              format: date-time
+        candidates:
+          type: array
+          items:
+            $ref: "#/components/schemas/BatchCandidate"
+    VerificationResult:
+      type: object
+      additionalProperties: false
+      required:
+        - verified
+        - status
+        - verificationCode
+        - issuedAt
+        - course
+        - trainingCentre
+      properties:
+        verified:
+          type: boolean
+        status:
+          type: string
+          enum: [ISSUED, REVOKED]
+        verificationCode:
+          type: string
+          example: SP-ABCD1234-EF567890
+        issuedAt:
+          type: string
+          format: date-time
+        course:
+          type: string
+          example: Full-Stack Web Development
+        trainingCentre:
+          type: string
+          example: North Skill Academy
+        revokedAt:
+          type: string
+          format: date-time
+    BulkVerificationFoundItem:
+      allOf:
+        - $ref: "#/components/schemas/VerificationResult"
+        - type: object
+          required: [found]
+          properties:
+            found:
+              type: boolean
+              enum: [true]
+    BulkVerificationNotFoundItem:
+      type: object
+      additionalProperties: false
+      required: [verificationCode, found]
+      properties:
+        verificationCode:
+          type: string
+        found:
+          type: boolean
+          enum: [false]
+    PartnerKeyMetadata:
+      type: object
+      required:
+        - id
+        - name
+        - prefix
+        - scopes
+        - status
+        - createdById
+        - createdAt
+        - expiresAt
+        - revokedById
+        - revokedAt
+        - lastUsedAt
+        - updatedAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        prefix:
+          type: string
+          example: sppk_0123456789ab
+        scopes:
+          type: array
+          items:
+            type: string
+            enum: [certificates:verify]
+        status:
+          type: string
+          enum: [ACTIVE, REVOKED, EXPIRED]
+        createdById:
+          type: string
+          format: uuid
+        createdAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        revokedById:
+          type: string
+          format: uuid
+          nullable: true
+        revokedAt:
+          type: string
+          format: date-time
+          nullable: true
+        lastUsedAt:
+          type: string
+          format: date-time
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+
+paths:
+  /:
+    get:
+      tags: [Health]
+      summary: Root API info
+      responses:
+        "200":
+          description: Service name and version
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  name:
+                    type: string
+                  version:
+                    type: string
+
+  /api/health:
+    get:
+      tags: [Health]
+      summary: Liveness check
+      responses:
+        "200":
+          description: API is running
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  message:
+                    type: string
+                  timestamp:
+                    type: string
+                    format: date-time
+
+  /api/health/outbox:
+    get:
+      tags: [Health]
+      summary: Certificate outbox processing summary
+      description: "Reports aggregate certificate outbox counts by status and age of oldest pending event (`Cache-Control: no-store`)."
+      responses:
+        "200":
+          description: Outbox summary counts and oldest pending age
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  timestamp:
+                    type: string
+                    format: date-time
+                  data:
+                    type: object
+                    required: [counts, oldestPendingCreatedAt, oldestPendingAgeMs]
+                    properties:
+                      counts:
+                        type: object
+                        properties:
+                          pending:
+                            type: integer
+                          processing:
+                            type: integer
+                          processed:
+                            type: integer
+                          deadLetter:
+                            type: integer
+                      oldestPendingCreatedAt:
+                        type: string
+                        format: date-time
+                        nullable: true
+                      oldestPendingAgeMs:
+                        type: integer
+                        nullable: true
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Register a new user
+      description: Assigns the default `MEMBER` role. Rate-limited to 5 requests per 15 minutes per IP. Password must be 8 characters minimum and at most 72 UTF-8 bytes.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                email:
+                  type: string
+                  format: email
+                  maxLength: 254
+                password:
+                  type: string
+                  minLength: 8
+      responses:
+        "201":
+          description: User registered and JWT issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: "#/components/schemas/AuthUser"
+                      token:
+                        type: string
+        "400":
+          description: Validation error
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "409":
+          description: Email already registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Too many registration attempts
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Log in with email and password
+      description: Rate-limited to 10 requests per 15 minutes per IP.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  type: string
+                  format: email
+                password:
+                  type: string
+                  minLength: 1
+      responses:
+        "200":
+          description: Authenticated user and JWT
+        "400":
+          description: Validation error
+        "401":
+          description: Invalid email or password
+        "429":
+          description: Too many login attempts
+
+  /api/auth/me:
+    get:
+      tags: [Auth]
+      summary: Get current authenticated user profile, roles, and permissions
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Current user
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      user:
+                        $ref: "#/components/schemas/CurrentUser"
+        "401":
+          description: Missing, invalid, or expired token
+        "404":
+          description: Authenticated user no longer exists
+
+  /api/courses:
+    get:
+      tags: [Courses]
+      summary: List courses with current qualifying rule version
+      description: Requires permission `courses.read`.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Course list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      courses:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/CourseWithRule"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+    post:
+      tags: [Courses]
+      summary: Create a course and initial rule version (v1)
+      description: Requires permission `courses.manage`. Writes an `AuditLog` entry atomically.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - code
+                - name
+                - minAttendancePercent
+                - minMarksPercent
+                - practicalRequired
+              properties:
+                code:
+                  type: string
+                  maxLength: 50
+                name:
+                  type: string
+                  maxLength: 200
+                minAttendancePercent:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                minMarksPercent:
+                  type: number
+                  minimum: 0
+                  maximum: 100
+                practicalRequired:
+                  type: boolean
+                minPracticalPercent:
+                  type: number
+                  nullable: true
+                  minimum: 0
+                  maximum: 100
+      responses:
+        "201":
+          description: Created course and initial rule version
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden
+        "409":
+          description: Course code already exists
+
+  /api/courses/{courseId}/rules:
+    get:
+      tags: [Courses]
+      summary: List immutable rule versions for a course
+      description: Requires permission `courses.read`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Course and rule versions
+        "400":
+          description: Invalid UUID
+        "404":
+          description: Course not found
+    post:
+      tags: [Courses]
+      summary: Publish a new immutable rule version for an existing course
+      description: Requires permission `courses.manage`. Existing batches keep their captured rule version.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: courseId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required:
+                - minAttendancePercent
+                - minMarksPercent
+                - practicalRequired
+              properties:
+                minAttendancePercent:
+                  type: number
+                minMarksPercent:
+                  type: number
+                practicalRequired:
+                  type: boolean
+                minPracticalPercent:
+                  type: number
+                  nullable: true
+      responses:
+        "201":
+          description: Published rule version
+        "400":
+          description: Validation error
+        "404":
+          description: Course not found
+
+  /api/batches:
+    get:
+      tags: [Batches]
+      summary: List batches (paginated, scoped)
+      description: Requires permission `batches.read`. Training Centre users see only their own centre; State Office and Admin users see batches across centres.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: page
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+      responses:
+        "200":
+          description: Paginated batch list
+        "400":
+          description: Invalid query parameters
+        "403":
+          description: Missing permission or invalid scope
+
+  /api/batches/import:
+    post:
+      tags: [Batches]
+      summary: Import candidate batch via raw CSV
+      description: |
+        Requires permission `batches.import` and an assigned Training Centre scope.
+        Content-Type must be `text/csv` (max `5mb`). Required exact CSV header row:
+        `candidateRef,fullName,phone,attendancePercent,marksPercent,practicalPercent`.
+        Captures the course's `currentRuleVersionId` automatically; rejects caller-supplied `ruleVersionId`.
+        Creates `Batch`, `Candidate`, `BatchCandidate`, `AuditLog` (`BATCH_IMPORTED`), and `OutboxEvent` (`BATCH_IMPORTED`) atomically.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: courseId
+          in: query
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          text/csv:
+            schema:
+              type: string
+            example: |
+              candidateRef,fullName,phone,attendancePercent,marksPercent,practicalPercent
+              CAND-1001,Asha Verma,+919876543210,85,78,80
+      responses:
+        "201":
+          description: Batch imported as DRAFT
+        "400":
+          description: Invalid content-type, query, or CSV rows
+        "403":
+          description: Forbidden scope or permission
+        "404":
+          description: Course not found
+
+  /api/batches/{batchId}:
+    get:
+      tags: [Batches]
+      summary: Get batch details and candidate snapshot entries
+      description: Requires `batches.read` and matching centre scope (or cross-centre access).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Batch detail
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      batch:
+                        $ref: "#/components/schemas/BatchDetail"
+        "403":
+          description: Forbidden
+        "404":
+          description: Batch not found
+
+  /api/batches/{batchId}/submit:
+    post:
+      tags: [Batches]
+      summary: Submit a DRAFT batch for review
+      description: Requires `batches.submit` and matching centre scope. Idempotent if already `SUBMITTED`; writes `AuditLog` and `OutboxEvent` (`BATCH_SUBMITTED`).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Batch submitted
+        "403":
+          description: Forbidden
+        "404":
+          description: Batch not found
+        "409":
+          description: Batch state conflict
+
+  /api/batches/{batchId}/candidates/{batchCandidateId}/review:
+    patch:
+      tags: [Batches]
+      summary: Approve or reject a qualified candidate in a submitted batch
+      description: |
+        Requires `candidates.review` and cross-centre authority (`STATE_OFFICE` or `ADMIN`).
+        `reason` is required when `status=REJECTED` (1–500 chars) and must be omitted when `status=APPROVED`.
+        Idempotent when repeating the exact finalized decision; `409` if batch is `DRAFT`, candidate is unqualified, or decision conflicts.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: batchCandidateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                  enum: [APPROVED, REJECTED]
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        "200":
+          description: Candidate review recorded
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden
+        "404":
+          description: Batch candidate not found
+        "409":
+          description: Review eligibility or state conflict
+
+  /api/batches/{batchId}/candidates/{batchCandidateId}/certificate:
+    post:
+      tags: [Certificates]
+      summary: Issue a certificate for an approved qualified candidate
+      description: |
+        Requires `certificates.issue` and cross-centre authority.
+        Generates a non-sequential `SP-<8HEX>-<8HEX>` code and PDF stored in PostgreSQL `BYTEA`.
+        Idempotent when an active `ISSUED` certificate already exists for the entry; returns `409` if previously revoked.
+        Atomically creates `Certificate`, `AuditLog` (`CERTIFICATE_ISSUED`), and `OutboxEvent` (`CERTIFICATE_ISSUED`).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: batchId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+        - name: batchCandidateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "201":
+          description: Certificate issued (or existing active certificate returned idempotently)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      certificate:
+                        $ref: "#/components/schemas/CertificateMetadata"
+        "403":
+          description: Forbidden
+        "404":
+          description: Batch candidate not found
+        "409":
+          description: Candidate not eligible or certificate already revoked
+
+  /api/certificates/{certificateId}/pdf:
+    get:
+      tags: [Certificates]
+      summary: Download generated certificate PDF
+      description: Requires `batches.read` (centre-scoped or cross-centre). Streams binary `application/pdf`.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: certificateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Certificate PDF binary
+          content:
+            application/pdf:
+              schema:
+                type: string
+                format: binary
+        "403":
+          description: Forbidden
+        "404":
+          description: Certificate not found
+
+  /api/certificates/{certificateId}/revoke:
+    post:
+      tags: [Certificates]
+      summary: Revoke an issued certificate
+      description: |
+        Requires `certificates.revoke` and cross-centre authority.
+        Idempotent if already `REVOKED` (returns existing record without duplicating audit/outbox entries).
+        Atomically records `AuditLog` (`CERTIFICATE_REVOKED`) and `OutboxEvent` (`CERTIFICATE_REVOKED`).
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: certificateId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [reason]
+              properties:
+                reason:
+                  type: string
+                  minLength: 1
+                  maxLength: 500
+      responses:
+        "200":
+          description: Revoked certificate metadata
+        "400":
+          description: Validation error
+        "403":
+          description: Forbidden
+        "404":
+          description: Certificate not found
+
+  /api/verify/{verificationCode}:
+    get:
+      tags: [Verification]
+      summary: Public certificate verification
+      description: |
+        Public read-only lookup by exact code (`SP-[A-F0-9]{8}-[A-F0-9]{8}`).
+        Returns `Cache-Control: no-store, max-age=0`. Rate-limited (`PUBLIC_VERIFY_RATE_LIMIT_MAX`, default 30 / 15m per IP).
+        Unknown, malformed, and partial codes return the identical `404` response. Never discloses candidate PII, internal IDs, or free-text revocation reasons.
+      parameters:
+        - name: verificationCode
+          in: path
+          required: true
+          schema:
+            type: string
+          example: SP-ABCD1234-EF567890
+      responses:
+        "200":
+          description: Minimal verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/VerificationResult"
+        "404":
+          description: Certificate not found (unknown or malformed code)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorEnvelope"
+        "429":
+          description: Rate limit exceeded
+
+  /api/partner/v1/certificates/verify/{verificationCode}:
+    get:
+      tags: [Verification]
+      summary: Partner v1 single-certificate verification
+      description: |
+        Read-only endpoint authenticated by `X-API-Key` with `certificates:verify` scope.
+        Rate-limited (`PARTNER_VERIFY_RATE_LIMIT_MAX`, default 120 / 15m per partner key).
+        Shares the exact verification service, `Cache-Control: no-store, max-age=0` headers, privacy bounds, and `404` behavior with `/api/verify/{verificationCode}`.
+      security:
+        - PartnerApiKey: []
+      parameters:
+        - name: verificationCode
+          in: path
+          required: true
+          schema:
+            type: string
+          example: SP-ABCD1234-EF567890
+      responses:
+        "200":
+          description: Minimal verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    $ref: "#/components/schemas/VerificationResult"
+        "401":
+          description: Missing, invalid, expired, or revoked partner API key
+        "403":
+          description: Partner key lacks `certificates:verify` scope
+        "404":
+          description: Certificate not found (unknown or malformed code)
+        "429":
+          description: Rate limit exceeded
+
+  /api/partner/v1/certificates/verify-bulk:
+    post:
+      tags: [Verification]
+      summary: Partner v1 bulk certificate verification
+      description: |
+        Read-only batch verification authenticated by `X-API-Key` (`certificates:verify`).
+        Accepts 1–100 trimmed verification codes without silent truncation. Preserves input order and duplicate positions.
+        Rate-limited separately to `PARTNER_BULK_VERIFY_RATE_LIMIT_MAX` (default 30 / 15m per partner key).
+      security:
+        - PartnerApiKey: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              additionalProperties: false
+              required: [verificationCodes]
+              properties:
+                verificationCodes:
+                  type: array
+                  minItems: 1
+                  maxItems: 100
+                  items:
+                    type: string
+                    minLength: 1
+                    maxLength: 64
+            example:
+              verificationCodes:
+                - SP-12345678-12345678
+                - SP-00000000-00000000
+      responses:
+        "200":
+          description: Ordered verification results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      results:
+                        type: array
+                        items:
+                          oneOf:
+                            - $ref: "#/components/schemas/BulkVerificationFoundItem"
+                            - $ref: "#/components/schemas/BulkVerificationNotFoundItem"
+        "400":
+          description: Validation error (malformed body, empty strings, or >100 entries)
+        "401":
+          description: Missing, invalid, expired, or revoked partner API key
+        "403":
+          description: Partner key lacks `certificates:verify` scope
+        "429":
+          description: Bulk rate limit exceeded
+
+  /api/partner-keys:
+    post:
+      tags: [PartnerKeys]
+      summary: Create a partner API key (secret returned once)
+      description: Requires JWT permission `partner_keys.manage` (`ADMIN`, `STATE_OFFICE`). Stores only prefix and keyed HMAC-SHA-256 hash; returns plaintext `apiKey` once. Records `PARTNER_KEY_CREATED` audit log without secret material.
+      security:
+        - BearerAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name:
+                  type: string
+                  minLength: 1
+                  maxLength: 100
+                scopes:
+                  type: array
+                  minItems: 1
+                  default: [certificates:verify]
+                  items:
+                    type: string
+                    enum: [certificates:verify]
+                expiresAt:
+                  type: string
+                  format: date-time
+      responses:
+        "201":
+          description: Key created (raw secret shown once)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      partnerKey:
+                        $ref: "#/components/schemas/PartnerKeyMetadata"
+                      apiKey:
+                        type: string
+                      warning:
+                        type: string
+        "400":
+          description: Validation error
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+    get:
+      tags: [PartnerKeys]
+      summary: List partner API key metadata
+      description: Requires JWT permission `partner_keys.read` (`ADMIN`, `STATE_OFFICE`). Never returns raw keys or hashes.
+      security:
+        - BearerAuth: []
+      responses:
+        "200":
+          description: Partner API key metadata list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      partnerKeys:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PartnerKeyMetadata"
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+
+  /api/partner-keys/{keyId}/revoke:
+    post:
+      tags: [PartnerKeys]
+      summary: Revoke a partner API key immediately
+      description: Requires JWT permission `partner_keys.manage` (`ADMIN`, `STATE_OFFICE`). Idempotent; records `PARTNER_KEY_REVOKED` audit log without secret material.
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: keyId
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      responses:
+        "200":
+          description: Revoked key metadata
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
+                  data:
+                    type: object
+                    properties:
+                      partnerKey:
+                        $ref: "#/components/schemas/PartnerKeyMetadata"
+        "400":
+          description: Invalid UUID
+        "401":
+          description: Unauthorized
+        "403":
+          description: Forbidden
+        "404":
+          description: Partner API key not found

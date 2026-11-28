@@ -4,11 +4,12 @@ import app from "./app.js";
 import { OutboxWorker } from "./modules/outbox/outbox.worker.js";
 
 const PORT = env.PORT;
+const HOST = env.HOST;
 const outboxEnabled = env.OUTBOX_WORKER_ENABLED ?? env.NODE_ENV !== "test";
 const outboxWorker = new OutboxWorker();
 
-const server = app.listen(PORT, "127.0.0.1", () => {
-  console.log(`Backend running at http://127.0.0.1:${PORT}`);
+const server = app.listen(PORT, HOST, () => {
+  console.log(`Backend running at http://${HOST}:${PORT}`);
   if (outboxEnabled) {
     outboxWorker.start();
     console.log("Outbox worker started");

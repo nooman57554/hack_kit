@@ -3,41 +3,90 @@ services:
     image: postgres:16-alpine
     container_name: hackkit-postgres
     restart: unless-stopped
-
     environment:
-      POSTGRES_USER: ${POSTGRES_USER}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
-      POSTGRES_DB: ${POSTGRES_DB}
-
+      POSTGRES_USER: ${POSTGRES_USER:-hackkit}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-hackkit_dev}
+      POSTGRES_DB: ${POSTGRES_DB:-hackkit}
     ports:
       - "127.0.0.1:5433:5432"
-
     volumes:
       - postgres_data:/var/lib/postgresql/data
-
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d ${POSTGRES_DB}"]
+      test:
+        [
+          "CMD-SHELL",
+          "pg_isready -U ${POSTGRES_USER:-hackkit} -d ${POSTGRES_DB:-hackkit}",
+        ]
       interval: 5s
       timeout: 5s
-      retries: 5
+      retries: 10
+      start_period: 5s
 
-  redis:
-    image: redis:7-alpine
-    container_name: hackkit-redis
+  backend:
+    build:
+      context: .
+      dockerfile: apps/backend/Dockerfile
+      network: host
+    container_name: hackkit-backend
     restart: unless-stopped
-
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 5000
+      HOST: 0.0.0.0
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-hackkit}:${POSTGRES_PASSWORD:-hackkit_dev}@postgres:5432/${POSTGRES_DB:-hackkit}?schema=public
+      JWT_SECRET: ${JWT_SECRET:-dev-only-jwt-secret-change-before-deployment-0123456789}
+      PARTNER_KEY_HASH_SECRET: ${PARTNER_KEY_HASH_SECRET:-dev-only-partner-hash-secret-change-before-deployment-0123456789}
+      PUBLIC_VERIFY_RATE_LIMIT_MAX: ${PUBLIC_VERIFY_RATE_LIMIT_MAX:-30}
+      PARTNER_VERIFY_RATE_LIMIT_MAX: ${PARTNER_VERIFY_RATE_LIMIT_MAX:-120}
+      PARTNER_BULK_VERIFY_RATE_LIMIT_MAX: ${PARTNER_BULK_VERIFY_RATE_LIMIT_MAX:-30}
+      OUTBOX_WORKER_ENABLED: ${OUTBOX_WORKER_ENABLED:-true}
+      OUTBOX_POLL_INTERVAL_MS: ${OUTBOX_POLL_INTERVAL_MS:-2000}
+      OUTBOX_BATCH_SIZE: ${OUTBOX_BATCH_SIZE:-10}
+      OUTBOX_LEASE_DURATION_MS: ${OUTBOX_LEASE_DURATION_MS:-30000}
+      OUTBOX_MAX_ATTEMPTS: ${OUTBOX_MAX_ATTEMPTS:-5}
+      OUTBOX_BACKOFF_BASE_MS: ${OUTBOX_BACKOFF_BASE_MS:-1000}
+      OUTBOX_BACKOFF_MAX_MS: ${OUTBOX_BACKOFF_MAX_MS:-60000}
+      DEMO_USER_PASSWORD: ${DEMO_USER_PASSWORD:-SkillPassDemo123!}
     ports:
-      - "127.0.0.1:6379:6379"
-
-    volumes:
-      - redis_data:/data
-
+      - "127.0.0.1:${PORT:-5000}:5000"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
-      timeout: 3s
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://127.0.0.1:5000/api/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+      start_period: 20s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: apps/frontend/Dockerfile
+      network: host
+    container_name: hackkit-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    ports:
+      - "127.0.0.1:5173:80"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "wget -q -O /dev/null http://127.0.0.1:80/ || exit 1",
+        ]
+      interval: 10s
+      timeout: 5s
       retries: 5
+      start_period: 5s
 
 volumes:
   postgres_data:
-  redis_data:
