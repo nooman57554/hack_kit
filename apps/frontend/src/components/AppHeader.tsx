@@ -49,14 +49,23 @@ export function AppHeader() {
         </div>
       </div>
 
-      <button
-        type="button"
-        onClick={handleLogout}
-        className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 cursor-pointer"
-      >
-        <LogOut className="h-4 w-4" />
-        Log out
-      </button>
+      <div className="flex items-center gap-2.5">
+        <Link
+          to="/verify"
+          className="inline-flex items-center rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-blue-500/40 hover:text-blue-300"
+        >
+          Verify Certificate
+        </Link>
+
+        <button
+          type="button"
+          onClick={handleLogout}
+          className="inline-flex items-center gap-2 rounded-lg border border-slate-700 bg-slate-800 px-3.5 py-2 text-sm font-semibold text-slate-200 transition hover:border-red-500/40 hover:bg-red-500/10 hover:text-red-300 cursor-pointer"
+        >
+          <LogOut className="h-4 w-4" />
+          Log out
+        </button>
+      </div>
     </header>
   );
 }

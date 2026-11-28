@@ -164,6 +164,16 @@ export function LoginPage() {
             Create one
           </Link>
         </p>
+
+        <p className="mt-3 text-center text-xs text-slate-400">
+          Need to check a credential?{" "}
+          <Link
+            to="/verify"
+            className="font-medium text-blue-400 hover:text-blue-300 transition"
+          >
+            Verify a certificate
+          </Link>
+        </p>
       </section>
     </main>
   );

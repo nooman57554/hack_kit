@@ -71,6 +71,14 @@ export const PERMISSIONS = {
     key: "certificates.revoke",
     description: "Revoke issued certificates",
   },
+  PARTNER_KEYS_READ: {
+    key: "partner_keys.read",
+    description: "List partner API key metadata",
+  },
+  PARTNER_KEYS_MANAGE: {
+    key: "partner_keys.manage",
+    description: "Create and revoke partner API keys",
+  },
 } as const;
 
 export type PermissionDefinition = (typeof PERMISSIONS)[keyof typeof PERMISSIONS];

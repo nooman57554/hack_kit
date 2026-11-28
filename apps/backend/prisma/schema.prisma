@@ -53,6 +53,8 @@ model User {
   reviewedBatchCandidates BatchCandidate[]    @relation("ReviewedBatchCandidates")
   issuedCertificates      Certificate[]       @relation("IssuedCertificates")
   revokedCertificates     Certificate[]       @relation("RevokedCertificates")
+  createdPartnerApiKeys   PartnerApiKey[]     @relation("CreatedPartnerApiKeys")
+  revokedPartnerApiKeys   PartnerApiKey[]     @relation("RevokedPartnerApiKeys")
   auditLogs               AuditLog[]
 
   @@index([districtId])
@@ -243,6 +245,28 @@ model Certificate {
   @@index([revokedById])
   @@index([status])
   @@map("certificates")
+}
+
+model PartnerApiKey {
+  id          String    @id @default(uuid())
+  name        String
+  prefix      String    @unique
+  secretHash  String    @unique
+  scopes      String[]
+  createdById String
+  createdAt   DateTime  @default(now())
+  expiresAt   DateTime?
+  revokedById String?
+  revokedAt   DateTime?
+  lastUsedAt  DateTime?
+  updatedAt   DateTime  @updatedAt
+  createdBy   User      @relation("CreatedPartnerApiKeys", fields: [createdById], references: [id], onDelete: Restrict)
+  revokedBy   User?     @relation("RevokedPartnerApiKeys", fields: [revokedById], references: [id], onDelete: Restrict)
+
+  @@index([createdById])
+  @@index([expiresAt])
+  @@index([revokedAt])
+  @@map("partner_api_keys")
 }
 
 model AuditLog {

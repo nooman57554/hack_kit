@@ -6,12 +6,18 @@ import { BatchDetailPage } from "./pages/BatchDetailPage";
 import { HomePage } from "./pages/HomePage";
 import { LoginPage } from "./pages/LoginPage";
 import { RegisterPage } from "./pages/RegisterPage";
+import { VerifyCertificatePage } from "./pages/VerifyCertificatePage";
 
 function App() {
   return (
     <BrowserRouter>
       <AuthProvider>
         <Routes>
+          <Route path="/verify" element={<VerifyCertificatePage />} />
+          <Route
+            path="/verify/:verificationCode"
+            element={<VerifyCertificatePage />}
+          />
           <Route
             path="/"
             element={

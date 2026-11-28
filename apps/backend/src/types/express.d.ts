@@ -8,6 +8,12 @@ declare global {
         trainingCenterId?: string | null;
       };
       userPermissions?: Set<string>;
+      partnerKey?: {
+        id: string;
+        name: string;
+        prefix: string;
+        scopes: string[];
+      };
     }
   }
 }
